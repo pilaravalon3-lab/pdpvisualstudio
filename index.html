@@ -4671,135 +4671,59 @@ async function aiEnhanceKeywords(idx) {
   
   if (btn) { btn.classList.add('loading'); btn.querySelector('span').textContent = '⟳ Mejorando...'; }
   
-  // Build context for Claude
   const currentKws = Object.entries(r.keywords).flatMap(([cat, kws]) => kws).slice(0, 15).join('\n');
-  const concepto = r.post.concepto || '';
-  const copy = r.post.copy || '';
-  const industry = cl.industry || '';
-  const mood = kv.mood || '';
-  const style = kv.style || '';
-  const format = r.post.format || '';
-
-  const systemPrompt = `Sos un director de arte especializado en búsqueda de imágenes para redes sociales. 
-Recibís keywords de búsqueda para bancos de imágenes (Shutterstock, Getty, Unsplash) y los mejorás siguiendo estas reglas estrictas:
-
-REGLAS CLAVE:
-1. Siempre en inglés
-2. NUNCA copiar la bajada/copy literalmente — interpretar la intención visual
-3. Estructuras válidas: [acción]+[contexto]+[usuario]+[estilo] | [estilo]+[contexto] | [estilo puro] | [contexto]+[usuario] | [acción]+[contexto]
-4. Combinar 3 capas: Concepto + Acción + Contexto
-5. Siempre agregar estética: warm light, natural light, candid, lifestyle, cinematic, etc.
-6. NO usar: isolated product, overly staged poses, extreme close-ups without context
-7. Prosa narrativa, no sopa de tags. Describir escenas reales.
-
-Respondé SOLO con JSON válido, sin markdown, sin explicaciones:
-{"mejorados": ["keyword1", "keyword2", ..., "keyword12"], "razon": "explicación breve en español de qué mejoraste y por qué"}`;
-
-  const userMsg = `Concepto/bajada: "${concepto} ${copy}"
-Industria: ${industry}
-Formato: ${format}
-Mood KV: ${mood}
-Estilo KV: ${style}
-
-Keywords actuales a mejorar:
-${currentKws}
-
-Generá 12 keywords mejorados que respeten las reglas. Interpretá la intención visual, no copies el texto.`;
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userMsg }]
-      })
+    const parsed = await callBackend('/api/enhance-keywords', {
+      keywords: currentKws,
+      concepto: r.post.concepto || '',
+      copy: r.post.copy || '',
+      industry: cl.industry || '',
+      mood: kv.mood || '',
+      style: kv.style || '',
+      format: r.post.format || ''
     });
 
-    const data = await response.json();
-    const raw = data.content?.[0]?.text || '{}';
-    
-    let parsed;
-    try {
-      parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
-    } catch {
-      throw new Error('Respuesta no válida de IA');
-    }
-
     if (parsed.mejorados && parsed.mejorados.length) {
-      // Save current version
       saveVersion(idx, 'keywords', r.keywords);
-      
-      // Add improved keywords as a new category
       r.keywords['✦ Mejorados con IA'] = parsed.mejorados.slice(0, 12);
-      
-      // Re-render keywords section
       const card = document.getElementById(`card-${idx}`);
       const subs = card.querySelectorAll('.sub, .hero-section');
       if (subs[0]) subs[0].outerHTML = renderKeywordsSection(idx, r.keywords, r.colorFilter);
-      
       showToast(`✦ ${parsed.mejorados.length} keywords mejorados con IA`);
     } else {
       showToast('No se pudieron mejorar los keywords');
     }
   } catch (err) {
     console.error('AI enhance error:', err);
-    showToast('Error al conectar con IA — revisá tu conexión');
+    showToast(`❌ Error: ${err.message}`);
   } finally {
     const btn2 = document.getElementById(`btn-ai-kw-${idx}`);
     if (btn2) { btn2.classList.remove('loading'); btn2.querySelector('span').textContent = '✦ Mejorar con IA'; }
   }
 }
 
-// ─── AI ENHANCE PROMPTS (Claude API) ───
-// Convierte el prompt actual en prosa narrativa mejorada
 async function aiEnhancePrompt(idx, tool) {
   const r = allResults[idx];
-  const cl = getClient();
   const currentPrompt = r.prompts[tool];
+  const btn_label = `⟳ Refinando...`;
   
   showToast('⟳ Refinando prompt con IA...');
 
-  const systemPrompt = `Sos un director de fotografía y arte especializado en prompts para IA generativa (Firefly, Gemini, DALL·E).
-Recibís un prompt en inglés y lo mejorás siguiendo la Guía de Prompts Creativos v2:
-
-CAMBIO DE PARADIGMA: De sopa de tags a PROSA NARRATIVA.
-Describí la escena como si le hablaras a un fotógrafo en un set real.
-Fórmula: [Sujeto] + [Acción/Gesto] + [Entorno] + [Iluminación] + [Estilo]
-
-ELIMINAR: 4k, 8k, hyperrealistic, professional photography, high detail, ultra detailed
-REEMPLAZAR POR: descripción de texturas específicas, luz con contexto, microgestos reales, entorno detallado
-
-Respondé SOLO con el prompt mejorado en inglés, sin explicaciones ni markdown.`;
-
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 800,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: `Mejorá este prompt:\n\n${currentPrompt}` }]
-      })
-    });
-
-    const data = await response.json();
-    const improved = data.content?.[0]?.text?.trim();
+    const result = await callBackend('/api/enhance-prompt', { prompt: currentPrompt });
+    const improved = result.improved;
     
     if (improved) {
       saveVersion(idx, `prompt_${tool}`, r.prompts[tool]);
       r.prompts[tool] = improved;
-      // Re-render prompts section
       const card = document.getElementById(`card-${idx}`);
       const subs = card.querySelectorAll('.sub, .hero-section');
       if (subs[1]) subs[1].outerHTML = renderPromptsSection(idx, r.prompts);
       showToast('✦ Prompt mejorado con IA');
     }
   } catch (err) {
-    showToast('Error al mejorar prompt');
+    showToast(`❌ Error: ${err.message}`);
     console.error(err);
   }
 }

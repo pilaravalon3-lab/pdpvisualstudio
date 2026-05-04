@@ -34,4 +34,4 @@ Click en **🔑 Keys** para configurar tu API key.
 
 ## Autor
 
-Pilar Arcuri — Avalon AI Challenge 2026
+Pilar Ceruso — Avalon AI Challenge 2026

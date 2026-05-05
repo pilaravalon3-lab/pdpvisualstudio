@@ -3712,6 +3712,11 @@ async function generateResults() {
     overlay.classList.remove('show');
     document.body.style.overflow = '';
   }, 200);
+  
+  // ─── BACKGROUND: Intentar mejorar SVGs con Gemini ───
+  allResults.forEach((r, idx) => {
+    fetchAIDesigns(idx, r.post, kv, cl).catch(e => console.log('AI SVG fallback used for post', idx));
+  });
 }
 
 function renderResults(results, client) {
@@ -4414,6 +4419,55 @@ function renderDesignsSection(idx, designs) {
   `;
 }
 
+// ─── FETCH AI-GENERATED SVG DESIGNS ───
+async function fetchAIDesigns(idx, post, kv, cl) {
+  const colorsList = (kv.colorsArr || []).map(c => c.hex).filter(Boolean);
+  const kvTypo = (kv.typo || '').trim() || 'Arial Black, Helvetica';
+  
+  try {
+    const result = await callBackend('/api/generate-svg', {
+      concepto: post.concepto || '',
+      copy: post.copy || '',
+      format: post.format || 'estático',
+      colors: colorsList.join(', ') || '#7d03ff, #ec4899, #1e1e2e',
+      fonts: kvTypo,
+      industry: cl.industry || 'general',
+      pilar: post.pilar || ''
+    });
+    
+    if (result.piezas && result.piezas.length > 0) {
+      // Validate each SVG
+      const validPieces = result.piezas.filter(p => {
+        return p.svg && p.svg.includes('<svg') && p.svg.includes('</svg>');
+      }).map(p => ({
+        name: p.name || 'IA Design',
+        format: '1080×1440',
+        svg: p.svg
+      }));
+      
+      if (validPieces.length >= 3) {
+        // Keep local pieces + add AI pieces
+        const existing = allResults[idx].designs;
+        allResults[idx].designs = [...validPieces, ...existing.slice(0, 4)];
+        
+        // Re-render designs section
+        const card = document.getElementById(`card-${idx}`);
+        if (card) {
+          const designSection = card.querySelector('[id^="dc-"]')?.parentElement;
+          if (designSection) {
+            designSection.outerHTML = renderDesignsSection(idx, allResults[idx].designs);
+            renderDesignSVGs(idx, allResults[idx].designs);
+          }
+        }
+        showToast(`✦ ${validPieces.length} piezas IA generadas para post ${idx + 1}`);
+      }
+    }
+  } catch (err) {
+    console.log('AI SVG generation failed for post', idx, ':', err.message);
+    // Silently keep local designs
+  }
+}
+
 // ─── AI ENHANCE DESIGNS ───
 // Usa IA para sugerir mejoras de composición, colores y layout de las piezas
 async function aiEnhanceDesigns(idx) {
@@ -4422,90 +4476,12 @@ async function aiEnhanceDesigns(idx) {
   const cl = getClient();
   const btn = document.getElementById(`btn-ai-dsg-${idx}`);
   
-  const ai = getCurrentAI();
-  if (!ai) {
-    showToast('❌ Agregá una API key (🔑 Keys arriba a la derecha)');
-    return;
-  }
+  if (btn) { btn.classList.add('loading'); btn.querySelector('span').textContent = '⟳ Generando con IA...'; }
   
-  if (btn) { btn.classList.add('loading'); btn.querySelector('span').textContent = '⟳ Mejorando diseños...'; }
-  
-  const concepto = r.post.concepto || '';
-  const copy = r.post.copy || '';
-  const format = r.post.format || 'estático';
-  const colors = extractedColors.length > 0 ? extractedColors.map(c => c.hex || c).join(', ') : '#7d03ff, #ec4899, #1e1e2e';
-  const fonts = kv.fonts || 'Unbounded, Poppins';
-  
-  const systemPrompt = `Sos un director de arte y diseñador gráfico experto en diseño para redes sociales.
-Te dan un concepto, copy, formato, colores y tipografías de una marca. 
-Tu tarea: sugerir 3 direcciones creativas para las piezas de diseño (SVG) de un posteo de Instagram.
-
-Cada dirección debe incluir:
-- nombre (2-3 palabras en español)
-- layout (dónde va el texto, dónde la imagen, qué proporción)
-- paleta (qué colores usar como dominante, secundario, acento)
-- tipografía (qué font para título vs subtítulo, tamaño relativo)
-- elementos (formas geométricas, líneas, gradients, overlays)
-- mood (la sensación visual general)
-
-Respondé SOLO con JSON: {"direcciones": [{"nombre": "...", "layout": "...", "paleta": "...", "tipografia": "...", "elementos": "...", "mood": "..."}]}`;
-
-  const userMsg = `Concepto: "${concepto}"
-Copy: "${copy}"
-Formato: ${format}
-Colores marca: ${colors}
-Tipografías: ${fonts}
-Industria: ${cl.industry || 'general'}
-
-Dame 3 direcciones creativas para este posteo.`;
-
   try {
-    let parsed;
-    if (ai.name === 'Gemini') {
-      parsed = await callGeminiAPI(systemPrompt, userMsg);
-    } else {
-      parsed = await callClaudeAPI(systemPrompt, userMsg);
-    }
-
-    if (parsed.direcciones && parsed.direcciones.length) {
-      // Render AI suggestions as a panel below the carousel
-      const carousel = document.getElementById(`dc-${idx}`);
-      if (!carousel) return;
-      
-      // Remove previous AI panel if exists
-      const prev = document.getElementById(`ai-dsg-panel-${idx}`);
-      if (prev) prev.remove();
-      
-      const panel = document.createElement('div');
-      panel.id = `ai-dsg-panel-${idx}`;
-      panel.className = 'ai-improve-result show';
-      panel.style.marginTop = '16px';
-      
-      panel.innerHTML = `
-        <strong>✦ ${parsed.direcciones.length} direcciones creativas sugeridas por ${ai.name}</strong>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:12px;">
-          ${parsed.direcciones.map((d, i) => `
-            <div style="padding:14px;background:rgba(125,3,255,0.06);border:1px solid rgba(125,3,255,0.15);border-radius:12px;">
-              <div style="font-family:'Unbounded',sans-serif;font-size:11px;font-weight:700;color:var(--purple-light);margin-bottom:8px;">${i+1}. ${d.nombre}</div>
-              <div style="font-size:11px;line-height:1.6;color:var(--text-secondary);">
-                <div style="margin-bottom:4px;"><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;">Layout:</span> ${d.layout}</div>
-                <div style="margin-bottom:4px;"><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;">Paleta:</span> ${d.paleta}</div>
-                <div style="margin-bottom:4px;"><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;">Tipo:</span> ${d.tipografia}</div>
-                <div style="margin-bottom:4px;"><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;">Elementos:</span> ${d.elementos}</div>
-                <div><span style="color:var(--text-muted);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;">Mood:</span> ${d.mood}</div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-        <button class="btn-ghost" onclick="this.closest('.ai-improve-result').remove()" style="margin-top:12px;font-size:10px;">Cerrar sugerencias</button>
-      `;
-      
-      carousel.parentNode.insertBefore(panel, carousel.nextSibling);
-      showToast(`✦ ${parsed.direcciones.length} direcciones creativas generadas con ${ai.name}`);
-    }
+    await fetchAIDesigns(idx, r.post, kv, cl);
   } catch (err) {
-    console.error('AI enhance designs error:', err);
-    showToast(`❌ Error: ${err.message || 'Revisá tu API key'}`);
+    showToast(`❌ Error: ${err.message}`);
   } finally {
     const btn2 = document.getElementById(`btn-ai-dsg-${idx}`);
     if (btn2) { btn2.classList.remove('loading'); btn2.querySelector('span').textContent = '✦ Mejorar diseños con IA'; }

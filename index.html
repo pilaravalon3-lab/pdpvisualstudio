@@ -1722,13 +1722,34 @@ function getStoredUser() {
 function handleAvatarUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('Imagen muy grande (máx 5MB)');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = ev => {
-    userAvatarData = ev.target.result;
-    document.getElementById('loginAvatarEmpty').style.display = 'none';
-    const img = document.getElementById('loginAvatarImg');
+    // Compress to 200x200 to save localStorage space
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 200;
+      canvas.height = 200;
+      const ctx = canvas.getContext('2d');
+      // Square crop center
+      const size = Math.min(img.width, img.height);
+      const sx = (img.width - size) / 2;
+      const sy = (img.height - size) / 2;
+      ctx.drawImage(img, sx, sy, size, size, 0, 0, 200, 200);
+      userAvatarData = canvas.toDataURL('image/jpeg', 0.85);
+      const empty = document.getElementById('loginAvatarEmpty');
+      const imgEl = document.getElementById('loginAvatarImg');
+      if (empty) empty.style.display = 'none';
+      if (imgEl) {
+        imgEl.src = userAvatarData;
+        imgEl.style.display = 'block';
+      }
+    };
     img.src = ev.target.result;
-    img.style.display = 'block';
   };
   reader.readAsDataURL(file);
 }
@@ -1785,7 +1806,12 @@ function getAccounts() {
 function saveAccounts(accounts) {
   try {
     localStorage.setItem('pdpvs_accounts', JSON.stringify(accounts));
-  } catch(e) { console.warn('Storage full:', e); }
+  } catch(e) {
+    if (e.name === 'QuotaExceededError' || e.code === 22) {
+      showToast('Almacenamiento lleno. Eliminá perfiles antiguos.');
+    }
+    console.warn('Storage error:', e);
+  }
 }
 
 function getAccountKey(name) {
@@ -2417,18 +2443,39 @@ function renderProfileCards() {
 function addProfileLogo(nameKey, input) {
   const file = input.files[0];
   if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('Imagen muy grande (máx 5MB)');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = e => {
-    const profiles = getProfiles();
-    const name = nameKey.replace(/_/g, ' ');
-    // Find profile by name
-    const match = Object.keys(profiles).find(k => k.replace(/\s+/g,'_') === nameKey);
-    if (match) {
-      profiles[match].logo = e.target.result;
-      localStorage.setItem('pdpvs_profiles', JSON.stringify(profiles));
-      renderProfileCards();
-      showToast('Logo guardado');
-    }
+    // Compress to 200x200
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 200;
+      canvas.height = 200;
+      const ctx = canvas.getContext('2d');
+      const size = Math.min(img.width, img.height);
+      const sx = (img.width - size) / 2;
+      const sy = (img.height - size) / 2;
+      ctx.drawImage(img, sx, sy, size, size, 0, 0, 200, 200);
+      const compressed = canvas.toDataURL('image/jpeg', 0.85);
+      
+      const profiles = getProfiles();
+      const match = Object.keys(profiles).find(k => k.replace(/\s+/g,'_') === nameKey);
+      if (match) {
+        profiles[match].logo = compressed;
+        try {
+          localStorage.setItem('pdpvs_profiles', JSON.stringify(profiles));
+          renderProfileCards();
+          showToast('Logo guardado');
+        } catch(err) {
+          showToast('Almacenamiento lleno');
+        }
+      }
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
@@ -2835,9 +2882,17 @@ function openClientLink(fieldId) {
 
 // ═══ BANKS ═══
 function openAllBanks(query, color) {
-  const e = encodeURIComponent(query);
-  // Color name mapping for banks that support color filters
-  const colorName = color ? getClosestColorName(color) : '';
+  if (!query || typeof query !== 'string') {
+    showToast('Keyword inválido');
+    return;
+  }
+  const cleanQuery = query.trim();
+  if (!cleanQuery) {
+    showToast('Keyword vacío');
+    return;
+  }
+  const e = encodeURIComponent(cleanQuery);
+  const colorName = color && /^#[0-9a-f]{6}$/i.test(color) ? getClosestColorName(color) : '';
   const urls = [
     `https://www.freepik.com/search?format=search&query=${e}${colorName ? `&color=${colorName}` : ''}`,
     `https://www.istockphoto.com/search/2/image?phrase=${e}${colorName ? `&colortype=${colorName}` : ''}`,
@@ -2845,54 +2900,85 @@ function openAllBanks(query, color) {
     `https://www.pexels.com/search/${e}/${colorName ? `?color=${colorName}` : ''}`,
     `https://www.pinterest.com/search/pins/?q=${e}${colorName ? `+${colorName}` : ''}`
   ];
-  urls.forEach(u => window.open(u, '_blank'));
+  
+  // Open first tab immediately (user gesture - won't be blocked)
+  const firstTab = window.open(urls[0], '_blank');
+  if (!firstTab) {
+    showToast('Habilitá popups para abrir 5 bancos');
+    // Fallback: open just the first one with location
+    window.location.href = urls[0];
+    return;
+  }
+  
+  // Stagger remaining tabs to avoid popup blockers
+  let delay = 100;
+  for (let i = 1; i < urls.length; i++) {
+    setTimeout(() => {
+      try {
+        window.open(urls[i], '_blank');
+      } catch(e) {
+        console.warn('Bank tab blocked:', urls[i]);
+      }
+    }, delay);
+    delay += 100;
+  }
+  
+  showToast(`Abriendo ${urls.length} bancos...`);
 }
 
 function getClosestColorName(hex) {
-  const r = parseInt(hex.substr(1,2),16), g = parseInt(hex.substr(3,2),16), b = parseInt(hex.substr(5,2),16);
-  const colors = [
-    {name:'red',r:255,g:0,b:0},{name:'orange',r:255,g:165,b:0},{name:'yellow',r:255,g:255,b:0},
-    {name:'green',r:0,g:128,b:0},{name:'blue',r:0,g:0,b:255},{name:'purple',r:128,g:0,b:128},
-    {name:'pink',r:255,g:192,b:203},{name:'brown',r:139,g:69,b:19},{name:'black',r:0,g:0,b:0},
-    {name:'white',r:255,g:255,b:255},{name:'gray',r:128,g:128,b:128},{name:'teal',r:0,g:128,b:128}
-  ];
-  let closest = '', minDist = Infinity;
-  colors.forEach(c => {
-    const dist = Math.sqrt((r-c.r)**2 + (g-c.g)**2 + (b-c.b)**2);
-    if (dist < minDist) { minDist = dist; closest = c.name; }
-  });
-  return closest;
+  if (!hex || typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) return '';
+  try {
+    const r = parseInt(hex.substr(1,2),16), g = parseInt(hex.substr(3,2),16), b = parseInt(hex.substr(5,2),16);
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return '';
+    const colors = [
+      {name:'red',r:255,g:0,b:0},{name:'orange',r:255,g:165,b:0},{name:'yellow',r:255,g:255,b:0},
+      {name:'green',r:0,g:128,b:0},{name:'blue',r:0,g:0,b:255},{name:'purple',r:128,g:0,b:128},
+      {name:'pink',r:255,g:192,b:203},{name:'brown',r:139,g:69,b:19},{name:'black',r:0,g:0,b:0},
+      {name:'white',r:255,g:255,b:255},{name:'gray',r:128,g:128,b:128},{name:'teal',r:0,g:128,b:128}
+    ];
+    let closest = '', minDist = Infinity;
+    colors.forEach(c => {
+      const dist = Math.sqrt((r-c.r)**2 + (g-c.g)**2 + (b-c.b)**2);
+      if (dist < minDist) { minDist = dist; closest = c.name; }
+    });
+    return closest;
+  } catch { return ''; }
 }
 
 // ═══ CONTEXT ═══
 function getKV() {
+  const get = (id) => document.getElementById(id)?.value?.trim() || '';
   return {
     colors: getColorsAsText(),
     colorsArr: extractedColors,
-    style: document.getElementById('kvStyle').value.trim(),
-    mood: document.getElementById('kvMood').value.trim(),
-    elements: document.getElementById('kvElements').value.trim(),
-    typo: document.getElementById('kvTypo').value.trim()
+    style: get('kvStyle'),
+    mood: get('kvMood'),
+    elements: get('kvElements'),
+    typo: get('kvTypo')
   };
 }
 function getClient() {
+  const get = (id) => document.getElementById(id)?.value?.trim() || '';
   return {
-    name: document.getElementById('clientName').value.trim() || 'Cliente',
-    industry: document.getElementById('clientIndustry').value.trim(),
-    audience: document.getElementById('clientAudience').value.trim()
+    name: get('clientName') || 'Cliente',
+    industry: get('clientIndustry'),
+    audience: get('clientAudience')
   };
 }
 function getPosts() {
   const posts = [];
   document.querySelectorAll('.post-entry').forEach(el => {
     const id = el.id.replace('pe-','');
-    if (!document.getElementById(`pf-${id}`)) return;
+    const pfEl = document.getElementById(`pf-${id}`);
+    if (!pfEl) return;
+    const get = (prefix) => document.getElementById(`${prefix}-${id}`)?.value?.trim() || '';
     posts.push({
       id: +id,
-      format: document.getElementById(`pf-${id}`).value,
-      pilar: document.getElementById(`pp-${id}`).value.trim(),
-      concepto: document.getElementById(`pc-${id}`).value.trim(),
-      copy: document.getElementById(`pt-${id}`).value.trim()
+      format: pfEl.value || 'estático',
+      pilar: get('pp'),
+      concepto: get('pc'),
+      copy: get('pt')
     });
   });
   return posts;
@@ -3151,10 +3237,10 @@ function interpretBajada(concepto, copy, industry) {
 // ═══════════════════════════════════════════════════════
 
 function generateKeywords(post, kv, client, seed) {
-  const concepto = post.concepto.toLowerCase();
-  const industry = client.industry.toLowerCase();
-  const audience = client.audience.toLowerCase();
-  const copy = post.copy.toLowerCase();
+  const concepto = (post.concepto || '').toLowerCase();
+  const industry = (client.industry || '').toLowerCase();
+  const audience = (client.audience || '').toLowerCase();
+  const copy = (post.copy || '').toLowerCase();
   
   // Build the visual system from KV
   const vsys = buildVisualSystem(kv);
@@ -3380,8 +3466,8 @@ function generatePrompts(post, kv, client, seed = 0, detailLevel = 1, pq = {}) {
     'hands wrapped around something warm, gaze drifting slightly off-frame',
     'the easy posture of someone who belongs in that space'
   ];
-  const micro = qExtra ? qExtra : microGestures[seed % microGestures.length];
-  const extraStr = qExtra ? `, ${qExtra}` : '';
+  const micro = microGestures[seed % microGestures.length];
+  const extraStr = qExtra ? `. Additional: ${qExtra}` : '';
 
   // ─── EMOTION / ATMOSPHERE ───
   const emotionLayer = qEmotion
@@ -3921,17 +4007,34 @@ async function generateResults() {
     await new Promise(r => setTimeout(r, 350));
   }
   
-  allResults = posts.map(p => ({
-    post: p,
-    keywords: generateKeywords(p, kv, cl, 1),
-    keywordSeed: 1,
-    prompts: generatePrompts(p, kv, cl, 0, 1, promptQuestionnaire[posts.indexOf(p)] || {}),
-    promptSeeds: { firefly: 0, gemini: 0, chatgpt: 0 },
-    promptDetail: { firefly: 1, gemini: 1, chatgpt: 1 },
-    designs: generateDesignPieces(p, kv, 0),
-    designSeed: 0,
-    colorFilter: null
-  }));
+  allResults = posts.map((p, postIdx) => {
+    try {
+      return {
+        post: p,
+        keywords: generateKeywords(p, kv, cl, 1),
+        keywordSeed: 1,
+        prompts: generatePrompts(p, kv, cl, 0, 1, promptQuestionnaire[postIdx] || {}),
+        promptSeeds: { firefly: 0, gemini: 0, chatgpt: 0 },
+        promptDetail: { firefly: 1, gemini: 1, chatgpt: 1 },
+        designs: generateDesignPieces(p, kv, 0),
+        designSeed: 0,
+        colorFilter: null
+      };
+    } catch(e) {
+      console.error('Error generating post', postIdx, e);
+      return {
+        post: p,
+        keywords: { 'Error': ['Ocurrió un error al generar este post'] },
+        keywordSeed: 1,
+        prompts: { firefly: 'Error', gemini: 'Error', chatgpt: 'Error' },
+        promptSeeds: { firefly: 0, gemini: 0, chatgpt: 0 },
+        promptDetail: { firefly: 1, gemini: 1, chatgpt: 1 },
+        designs: [],
+        designSeed: 0,
+        colorFilter: null
+      };
+    }
+  });
   
   stepEl.textContent = steps[steps.length - 1];
   await new Promise(r => setTimeout(r, 300));
@@ -4076,18 +4179,21 @@ function renderKeywordsSection(idx, keywords, colorFilter) {
   Object.entries(keywords).forEach(([catName, kws]) => {
     if (!kws.length) return;
     const displayName = catDescriptions[catName] || catName;
+    const escHTML = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     html += `
       <div class="kw-cat">
-        <div class="kw-cat-label">${displayName}</div>
+        <div class="kw-cat-label">${escHTML(displayName)}</div>
         <div class="kw-list">
           ${kws.map(kw => {
             const isFav = favorites.includes(kw);
+            const safeText = escHTML(kw);
+            const safeAttr = String(kw).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
             return `
             <div class="kw-item${isFav ? ' kw-fav' : ''}">
-              <button class="kw-fav-btn${isFav ? ' active' : ''}" onclick="toggleFavKeyword(${idx}, '${kw.replace(/'/g,"\\'")}', this)" title="${isFav ? 'Quitar de favoritos' : 'Agregar a favoritos'}">★</button>
-              <span class="kw-text">${kw}</span>
-              <button class="btn-search" onclick="openAllBanks('${kw.replace(/'/g,"\\'")}', '${colorFilter || ''}')">Buscar en 5 bancos</button>
-              <button class="kw-discard-btn" onclick="discardKeyword(${idx}, '${kw.replace(/'/g,"\\'")}', this)" title="No me sirve — el Studio aprende">✕</button>
+              <button class="kw-fav-btn${isFav ? ' active' : ''}" onclick="toggleFavKeyword(${idx}, '${safeAttr}', this)" title="${isFav ? 'Quitar de favoritos' : 'Agregar a favoritos'}">★</button>
+              <span class="kw-text">${safeText}</span>
+              <button class="btn-search" onclick="openAllBanks('${safeAttr}', '${colorFilter || ''}')">Buscar en 5 bancos</button>
+              <button class="kw-discard-btn" onclick="discardKeyword(${idx}, '${safeAttr}', this)" title="No me sirve — el Studio aprende">✕</button>
             </div>`;
           }).join('')}
         </div>
@@ -4390,7 +4496,7 @@ function discardKeyword(idx, kw, btn) {
   }
   
   // Animate removal
-  const item = btn.closest('.kw-item');
+  const item = btn?.closest('.kw-item');
   if (item) {
     item.style.transition = 'all 0.3s';
     item.style.opacity = '0';
@@ -4414,30 +4520,41 @@ function toggleFavKeyword(idx, kw, btn) {
     favorites.push(kw);
     showToast('★ Guardado en favoritos');
   }
-  localStorage.setItem(favKey, JSON.stringify(favorites));
+  try {
+    localStorage.setItem(favKey, JSON.stringify(favorites));
+  } catch(e) { console.warn(e); }
   
   // Re-render
   const card = document.getElementById('card-' + idx);
-  const subs = card.querySelectorAll('.sub, .hero-section');
-  if (subs[0]) subs[0].outerHTML = renderKeywordsSection(idx, allResults[idx].keywords, allResults[idx].colorFilter);
+  if (card && allResults[idx]) {
+    const subs = card.querySelectorAll('.sub, .hero-section');
+    if (subs[0]) subs[0].outerHTML = renderKeywordsSection(idx, allResults[idx].keywords, allResults[idx].colorFilter);
+  }
 }
 
 function addUserKeyword(idx) {
   const input = document.getElementById('cs-' + idx);
+  if (!input) return;
   const v = input.value.trim();
-  if (!v) return;
+  if (!v) {
+    showToast('Escribí un keyword primero');
+    input.focus();
+    return;
+  }
   // Save to memory
   if (!userKeywords.includes(v)) {
     userKeywords.push(v);
   }
   // Open in banks
-  openAllBanks(v, allResults[idx].colorFilter || '');
+  openAllBanks(v, allResults[idx]?.colorFilter || '');
   // Clear input
   input.value = '';
   // Re-render keywords section to show saved keyword
   const card = document.getElementById('card-' + idx);
-  const subs = card.querySelectorAll('.sub, .hero-section');
-  if (subs[0]) subs[0].outerHTML = renderKeywordsSection(idx, allResults[idx].keywords, allResults[idx].colorFilter);
+  if (card) {
+    const subs = card.querySelectorAll('.sub, .hero-section');
+    if (subs[0]) subs[0].outerHTML = renderKeywordsSection(idx, allResults[idx].keywords, allResults[idx].colorFilter);
+  }
   showToast('Keyword guardado — mejora futuras búsquedas');
 }
 
@@ -4550,6 +4667,8 @@ function renderPromptsSection(idx, prompts) {
               if (el && better && better !== prompts[t.key]) el.textContent = better;
             }).catch(() => {});
           }, 500 + Math.random() * 2000); // stagger requests
+          // Escape HTML to prevent rendering issues
+          const escapeHTML = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           return `
           <div class="prompt-card" id="pc-${idx}-${t.key}">
             <div class="prompt-head">
@@ -4565,11 +4684,11 @@ function renderPromptsSection(idx, prompts) {
             <div class="prompt-dual">
               <div class="prompt-dual-col">
                 <div class="prompt-dual-label">ENGLISH</div>
-                <div class="prompt-body" id="pb-${idx}-${t.key}">${prompts[t.key]}</div>
+                <div class="prompt-body" id="pb-${idx}-${t.key}">${escapeHTML(prompts[t.key])}</div>
               </div>
               <div class="prompt-dual-col">
                 <div class="prompt-dual-label">ESPAÑOL</div>
-                <div class="prompt-body prompt-body-es" id="pbes-${idx}-${t.key}">${esPrompt}</div>
+                <div class="prompt-body prompt-body-es" id="pbes-${idx}-${t.key}">${escapeHTML(esPrompt)}</div>
               </div>
             </div>
             <div class="detail-form" id="df-${idx}-${t.key}">
@@ -4632,15 +4751,17 @@ function renderDesignsSection(idx, designs) {
         </button>
       </div>
       <div class="design-carousel" id="dc-${idx}">
-        ${designs.map((d, di) => `
+        ${designs.map((d, di) => {
+          const escapeHTML = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+          return `
           <div class="design-piece" onclick="openDesignViewer(${idx}, ${di})" style="cursor:pointer;">
             <div class="design-svg-wrap" id="svg-wrap-${idx}-${di}"></div>
             <div class="design-info">
-              <div><div class="design-name">${d.name}</div><div class="design-format">${d.format}</div></div>
+              <div><div class="design-name">${escapeHTML(d.name)}</div><div class="design-format">${escapeHTML(d.format)}</div></div>
               <button class="btn-download" onclick="event.stopPropagation();downloadSVG(${idx}, ${di})">SVG ↓</button>
             </div>
           </div>
-        `).join('')}
+        `;}).join('')}
       </div>
     </div>
     <div class="dv-overlay" id="dvo-${idx}" style="display:none;" onclick="closeDesignViewer(${idx})">
@@ -4861,18 +4982,44 @@ function renderDesignSVGs(idx, designs) {
 const BACKEND_URL = 'https://pdpvisualstudio-backend.onrender.com';
 
 // ─── Llamada genérica al backend ───
-async function callBackend(endpoint, body) {
-  const res = await fetch(`${BACKEND_URL}${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...body, ai: AI_CONFIG.PREFERRED_AI })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Error ${res.status}`);
+async function callBackend(endpoint, body, timeoutMs = 60000) {
+  // AbortController for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, ai: AI_CONFIG.PREFERRED_AI }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Backend error ${res.status}`);
+    }
+    return res.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Timeout — el servidor tardó demasiado');
+    }
+    if (err.message && err.message.includes('Failed to fetch')) {
+      throw new Error('Sin conexión con el servidor');
+    }
+    throw err;
   }
-  return res.json();
 }
+
+// Wake up backend on app load (Render free tier sleeps after 15min)
+async function wakeBackend() {
+  try {
+    await fetch(BACKEND_URL, { method: 'GET' });
+  } catch {}
+}
+window.addEventListener('load', () => setTimeout(wakeBackend, 1000));
 
 // ─── Keywords ───
 async function callClaudeAPI(systemPrompt, userMsg) {
@@ -5044,7 +5191,8 @@ function regeneratePrompt(idx, tool) {
   const pq = promptQuestionnaire[idx] || {};
   const newPrompts = generatePrompts(r.post, getKV(), getClient(), r.promptSeeds[tool], r.promptDetail[tool], pq);
   r.prompts[tool] = newPrompts[tool];
-  document.getElementById(`pb-${idx}-${tool}`).textContent = newPrompts[tool];
+  const enEl = document.getElementById(`pb-${idx}-${tool}`);
+  if (enEl) enEl.textContent = newPrompts[tool];
   const esEl = document.getElementById(`pbes-${idx}-${tool}`);
   if (esEl) {
     esEl.textContent = quickTranslateToES(newPrompts[tool]);
@@ -5057,7 +5205,8 @@ function regeneratePrompt(idx, tool) {
 
 function applyDetailToPrompt(idx, tool) {
   const r = allResults[idx];
-  const userDetail = document.getElementById(`dfi-${idx}-${tool}`).value.trim();
+  const dfiEl = document.getElementById(`dfi-${idx}-${tool}`);
+  const userDetail = dfiEl ? dfiEl.value.trim() : '';
   r.promptDetail[tool] = 2;
   
   // Get user input and add it to the questionnaire as extra context
@@ -5070,11 +5219,11 @@ function applyDetailToPrompt(idx, tool) {
   // FULL REGENERATION with detail level 2 + user emphasis baked in
   const newPrompts = generatePrompts(r.post, getKV(), getClient(), r.promptSeeds[tool], 2, enrichedQ);
   r.prompts[tool] = newPrompts[tool];
-  document.getElementById(`pb-${idx}-${tool}`).textContent = r.prompts[tool];
+  const enEl = document.getElementById(`pb-${idx}-${tool}`);
+  if (enEl) enEl.textContent = r.prompts[tool];
   const esEl2 = document.getElementById(`pbes-${idx}-${tool}`);
   if (esEl2) {
     esEl2.textContent = quickTranslateToES(r.prompts[tool]);
-    // Improve with AI translation in background
     translateText(r.prompts[tool], 'es').then(better => {
       if (better && better !== r.prompts[tool]) esEl2.textContent = better;
     }).catch(() => {});

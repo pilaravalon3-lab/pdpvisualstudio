@@ -1340,28 +1340,43 @@ select option { background: var(--bg2); color: var(--white); }
         <img class="login-avatar-img" id="loginAvatarImg" style="display:none;" />
       </div>
       
+      <!-- TAB SWITCHER -->
+      <div style="display:flex;background:rgba(255,255,255,0.05);border-radius:10px;padding:4px;margin-bottom:24px;">
+        <button type="button" id="loginTabSignin" onclick="switchLoginTab('signin')" style="flex:1;padding:10px;background:rgba(125,3,255,0.2);border:none;color:var(--text);border-radius:8px;cursor:pointer;font-family:'Unbounded',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.05em;">
+          Iniciar sesión
+        </button>
+        <button type="button" id="loginTabSignup" onclick="switchLoginTab('signup')" style="flex:1;padding:10px;background:transparent;border:none;color:var(--text-muted);border-radius:8px;cursor:pointer;font-family:'Unbounded',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.05em;">
+          Registrarse
+        </button>
+      </div>
+      
       <div class="login-field">
         <label>Tu nombre completo</label>
         <input type="text" id="loginName" placeholder="Pilar Cánepa" autocomplete="name" onkeydown="if(event.key==='Enter'){completeLogin();}" />
       </div>
       
       <div class="login-field">
+        <label>Contraseña</label>
+        <input type="password" id="loginPassword" placeholder="Mínimo 4 caracteres" autocomplete="current-password" onkeydown="if(event.key==='Enter'){completeLogin();}" />
+      </div>
+      
+      <div class="login-field" id="loginEmailField" style="display:none;">
         <label>Email <span style="opacity:0.5;font-weight:400;">· opcional</span></label>
         <input type="email" id="loginEmail" placeholder="pilar@avalon.com" autocomplete="email" />
       </div>
       
-      <div class="login-field">
+      <div class="login-field" id="loginRoleField" style="display:none;">
         <label>Tu rol <span style="opacity:0.5;font-weight:400;">· opcional</span></label>
         <input type="text" id="loginRole" placeholder="Diseñadora gráfica" />
       </div>
       
-      <button type="button" class="login-btn" onclick="completeLogin()">
-        Empezar a diseñar
+      <button type="button" class="login-btn" id="loginBtn" onclick="completeLogin()">
+        <span id="loginBtnText">Iniciar sesión</span>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
       </button>
       
       <p class="login-disclaimer">
-        Tus datos quedan guardados solo en este navegador. No se envían a ningún servidor.
+        Tu progreso se guarda en este navegador y se vincula a tu cuenta. Recordá tu contraseña — no hay forma de recuperarla.
       </p>
     </div>
   </div>
@@ -1697,7 +1712,10 @@ let userAvatarData = null;
 
 function getStoredUser() {
   try {
-    return JSON.parse(localStorage.getItem('pdpvs_user') || 'null');
+    const activeKey = localStorage.getItem('pdpvs_active_user');
+    if (!activeKey) return null;
+    const accounts = JSON.parse(localStorage.getItem('pdpvs_accounts') || '{}');
+    return accounts[activeKey]?.user || null;
   } catch { return null; }
 }
 
@@ -1715,50 +1733,214 @@ function handleAvatarUpload(e) {
   reader.readAsDataURL(file);
 }
 
+// ─── LOGIN MODE: 'signin' or 'signup' ───
+let loginMode = 'signin';
+
+function switchLoginTab(mode) {
+  loginMode = mode;
+  const signinTab = document.getElementById('loginTabSignin');
+  const signupTab = document.getElementById('loginTabSignup');
+  const emailField = document.getElementById('loginEmailField');
+  const roleField = document.getElementById('loginRoleField');
+  const btnText = document.getElementById('loginBtnText');
+  
+  if (mode === 'signup') {
+    signupTab.style.background = 'rgba(125,3,255,0.2)';
+    signupTab.style.color = 'var(--text)';
+    signinTab.style.background = 'transparent';
+    signinTab.style.color = 'var(--text-muted)';
+    if (emailField) emailField.style.display = 'block';
+    if (roleField) roleField.style.display = 'block';
+    if (btnText) btnText.textContent = 'Crear cuenta';
+  } else {
+    signinTab.style.background = 'rgba(125,3,255,0.2)';
+    signinTab.style.color = 'var(--text)';
+    signupTab.style.background = 'transparent';
+    signupTab.style.color = 'var(--text-muted)';
+    if (emailField) emailField.style.display = 'none';
+    if (roleField) roleField.style.display = 'none';
+    if (btnText) btnText.textContent = 'Iniciar sesión';
+  }
+}
+
+// ─── HASH SIMPLE para passwords (no es bcrypt pero suficiente para localStorage) ───
+function hashPassword(pw) {
+  let hash = 0;
+  const salted = pw + '_pdpvs_salt_2026';
+  for (let i = 0; i < salted.length; i++) {
+    const char = salted.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+// ─── ACCOUNT MANAGEMENT ───
+function getAccounts() {
+  try {
+    return JSON.parse(localStorage.getItem('pdpvs_accounts') || '{}');
+  } catch { return {}; }
+}
+
+function saveAccounts(accounts) {
+  try {
+    localStorage.setItem('pdpvs_accounts', JSON.stringify(accounts));
+  } catch(e) { console.warn('Storage full:', e); }
+}
+
+function getAccountKey(name) {
+  return name.trim().toLowerCase();
+}
+
 function completeLogin() {
   const nameEl = document.getElementById('loginName');
+  const pwEl = document.getElementById('loginPassword');
   const name = nameEl ? nameEl.value.trim() : '';
+  const password = pwEl ? pwEl.value : '';
   
+  // Validate name
   if (!name) {
     if (nameEl) {
       nameEl.style.borderColor = 'var(--orange)';
-      nameEl.placeholder = 'Escribí tu nombre para continuar';
       nameEl.focus();
       setTimeout(() => { nameEl.style.borderColor = ''; }, 2000);
     }
+    showToast('Escribí tu nombre');
     return;
   }
   
-  const user = {
-    name: name,
-    email: document.getElementById('loginEmail')?.value.trim() || '',
-    role: document.getElementById('loginRole')?.value.trim() || 'Diseñador/a',
-    avatar: userAvatarData,
-    createdAt: new Date().toISOString(),
-    stats: {
-      piecesDesigned: 0,
-      promptsGenerated: 0,
-      keywordsCreated: 0,
-      pdpsCompleted: 0
+  // Validate password
+  if (!password || password.length < 4) {
+    if (pwEl) {
+      pwEl.style.borderColor = 'var(--orange)';
+      pwEl.focus();
+      setTimeout(() => { pwEl.style.borderColor = ''; }, 2000);
     }
-  };
-  
-  try {
-    localStorage.setItem('pdpvs_user', JSON.stringify(user));
-  } catch(e) {
-    console.warn('localStorage not available:', e);
+    showToast('Contraseña mínimo 4 caracteres');
+    return;
   }
   
-  currentUser = user;
-  showApp();
+  const accounts = getAccounts();
+  const key = getAccountKey(name);
+  const pwHash = hashPassword(password);
   
-  // Toast con fallback
+  if (loginMode === 'signin') {
+    // SIGN IN
+    const account = accounts[key];
+    if (!account) {
+      showToast('No existe esa cuenta. Probá registrarte.');
+      switchLoginTab('signup');
+      return;
+    }
+    if (account.passwordHash !== pwHash) {
+      if (pwEl) {
+        pwEl.style.borderColor = 'var(--orange)';
+        pwEl.value = '';
+        pwEl.focus();
+        setTimeout(() => { pwEl.style.borderColor = ''; }, 2000);
+      }
+      showToast('Contraseña incorrecta');
+      return;
+    }
+    currentUser = account.user;
+  } else {
+    // SIGN UP
+    if (accounts[key]) {
+      showToast('Ya existe una cuenta con ese nombre. Iniciá sesión.');
+      switchLoginTab('signin');
+      return;
+    }
+    currentUser = {
+      name: name,
+      email: document.getElementById('loginEmail')?.value.trim() || '',
+      role: document.getElementById('loginRole')?.value.trim() || 'Diseñador/a',
+      avatar: userAvatarData,
+      createdAt: new Date().toISOString(),
+      stats: { piecesDesigned: 0, promptsGenerated: 0, keywordsCreated: 0, pdpsCompleted: 0 }
+    };
+    accounts[key] = {
+      user: currentUser,
+      passwordHash: pwHash,
+      progress: {}
+    };
+    saveAccounts(accounts);
+  }
+  
+  // Save active session (persistent + session)
   try {
-    showToast(`¡Bienvenida, ${name.split(' ')[0]}!`);
+    localStorage.setItem('pdpvs_active_user', key);
+    localStorage.setItem('pdpvs_user', JSON.stringify(currentUser));
+    sessionStorage.setItem('pdpvs_session_user', key);
+  } catch(e) { console.warn(e); }
+  
+  // Restore user progress
+  restoreUserProgress();
+  
+  showApp();
+  showToast(`¡Bienvenida, ${name.split(' ')[0]}!`);
+}
+
+// ─── AUTO-SAVE: Guarda el progreso del usuario ───
+function saveUserProgress() {
+  if (!currentUser) return;
+  try {
+    const accounts = getAccounts();
+    const key = getAccountKey(currentUser.name);
+    if (!accounts[key]) return;
+    
+    accounts[key].progress = {
+      profiles: localStorage.getItem('pdpvs_profiles') || '{}',
+      lastClient: localStorage.getItem('pdpvs_last_client') || '',
+      userKeywords: userKeywords || [],
+      lastResults: allResults && allResults.length ? {
+        timestamp: Date.now(),
+        client: getClient(),
+        kv: getKV(),
+        posts: allResults.map(r => r.post)
+      } : null,
+      savedAt: Date.now()
+    };
+    saveAccounts(accounts);
   } catch(e) {
-    console.log('Welcome:', name);
+    console.warn('Save failed:', e);
   }
 }
+
+function restoreUserProgress() {
+  if (!currentUser) return;
+  try {
+    const accounts = getAccounts();
+    const key = getAccountKey(currentUser.name);
+    const progress = accounts[key]?.progress;
+    if (!progress) return;
+    
+    if (progress.profiles) {
+      localStorage.setItem('pdpvs_profiles', progress.profiles);
+    }
+    if (progress.lastClient) {
+      localStorage.setItem('pdpvs_last_client', progress.lastClient);
+    }
+    if (progress.userKeywords) {
+      userKeywords = progress.userKeywords;
+    }
+  } catch(e) {
+    console.warn('Restore failed:', e);
+  }
+}
+
+// Auto-save cada 10 segundos si hay cambios
+let lastSaveTime = 0;
+setInterval(() => {
+  if (currentUser && Date.now() - lastSaveTime > 10000) {
+    saveUserProgress();
+    lastSaveTime = Date.now();
+  }
+}, 10000);
+
+// Save when leaving the page
+window.addEventListener('beforeunload', () => {
+  if (currentUser) saveUserProgress();
+});
 
 function showApp() {
   const login = document.getElementById('loginScreen');
@@ -1807,23 +1989,31 @@ function updateUserStats() {
 }
 
 function logoutUser() {
-  if (!confirm('¿Cerrar sesión? Tus datos seguirán guardados en este navegador.')) return;
-  // Don't delete data, just hide app
+  if (!confirm('¿Cerrar sesión? Tu progreso queda guardado.')) return;
+  // Save progress before logout
+  saveUserProgress();
+  // Clear session (but keep account)
+  sessionStorage.removeItem('pdpvs_session_user');
+  
   const login = document.getElementById('loginScreen');
   document.getElementById('userStrip').style.display = 'none';
   login.style.display = 'flex';
   login.classList.remove('hide');
   // Pre-fill name if returning
   if (currentUser) {
-    document.getElementById('loginName').value = currentUser.name;
-    if (currentUser.email) document.getElementById('loginEmail').value = currentUser.email;
-    if (currentUser.role) document.getElementById('loginRole').value = currentUser.role;
+    const nameEl = document.getElementById('loginName');
+    if (nameEl) nameEl.value = currentUser.name;
+    const pwEl = document.getElementById('loginPassword');
+    if (pwEl) { pwEl.value = ''; pwEl.focus(); }
     if (currentUser.avatar) {
       userAvatarData = currentUser.avatar;
-      document.getElementById('loginAvatarEmpty').style.display = 'none';
+      const empty = document.getElementById('loginAvatarEmpty');
       const img = document.getElementById('loginAvatarImg');
-      img.src = currentUser.avatar;
-      img.style.display = 'block';
+      if (empty) empty.style.display = 'none';
+      if (img) {
+        img.src = currentUser.avatar;
+        img.style.display = 'block';
+      }
     }
   }
 }
@@ -1840,12 +2030,41 @@ function toggleSettingsMenu() {
   showToast('Menú de ajustes (próximamente)');
 }
 
-// Auto-login if user exists
+// Pre-fill last user's name on login screen (but require password)
 window.addEventListener('DOMContentLoaded', () => {
   const stored = getStoredUser();
   if (stored && stored.name) {
-    currentUser = stored;
-    // Wait for DOM to be fully ready
+    setTimeout(() => {
+      try {
+        const nameEl = document.getElementById('loginName');
+        const pwEl = document.getElementById('loginPassword');
+        if (nameEl) nameEl.value = stored.name;
+        if (pwEl) pwEl.focus();
+      } catch(e) { console.warn(e); }
+    }, 100);
+  }
+});
+
+// Session-only auto-login (within same browser tab session)
+const _sessionLogin = sessionStorage.getItem('pdpvs_session_user');
+if (_sessionLogin) {
+  try {
+    const accounts = JSON.parse(localStorage.getItem('pdpvs_accounts') || '{}');
+    const account = accounts[_sessionLogin];
+    if (account) {
+      currentUser = account.user;
+      window.addEventListener('DOMContentLoaded', () => {
+        restoreUserProgress();
+        showApp();
+      });
+    }
+  } catch(e) { console.warn(e); }
+}
+
+// LEGACY auto-login (keep for users without password from before)
+window.addEventListener('DOMContentLoaded', () => {
+  const stored = getStoredUser();
+  if (stored && stored.name && !currentUser) {
     setTimeout(() => {
       try {
         const nameEl = document.getElementById('loginName');
@@ -3432,7 +3651,6 @@ function generateIdeas(post, kv) {
 function generateDesignPieces(post, kv, seed = 0) {
   const colorsList = (kv.colorsArr || []).map(c => c.hex);
   
-  // Shuffle colors based on seed for design regeneration
   const shuffleArr = (arr, s) => {
     const a = [...arr]; let m = a.length;
     while (m) {
@@ -3443,15 +3661,11 @@ function generateDesignPieces(post, kv, seed = 0) {
   };
   
   const shuffledColors = seed > 0 ? shuffleArr(colorsList, seed * 31) : colorsList;
-  
-  // Use REAL KV colors with fallback
   const primary = shuffledColors[0] || '#7d03ff';
   const secondary = shuffledColors[1] || shuffledColors[0] || '#1a1a2e';
   const accent = shuffledColors[2] || shuffledColors[1] || '#ff7939';
   const fourth = shuffledColors[3] || shuffledColors[0] || '#3d3d4d';
-  const fifth = shuffledColors[4] || shuffledColors[2] || '#5d5d7d';
   
-  // Find lightest and darkest from actual palette
   const colorBrightness = (c) => {
     const r = parseInt(c.substr(1,2),16), g = parseInt(c.substr(3,2),16), b = parseInt(c.substr(5,2),16);
     return (r+g+b)/3;
@@ -3459,197 +3673,203 @@ function generateDesignPieces(post, kv, seed = 0) {
   const sortedByBrightness = [...colorsList].sort((a,b) => colorBrightness(a) - colorBrightness(b));
   const dark = sortedByBrightness[0] || '#0a0a0a';
   const light = sortedByBrightness[sortedByBrightness.length - 1] || '#ffffff';
-  // Mid-tone
   const mid = sortedByBrightness[Math.floor(sortedByBrightness.length / 2)] || primary;
   
   const concepto = post.concepto || 'Concepto';
   const W = 1080;
   const H = designSize === 'story' ? 1920 : 1440;
   
-  // Use client typography if set, fallback to Arial Black
-  // Sanitize: extract just font names (remove descriptions like "bold", "elegante")
-  let kvTypo = (kv.typo || '').trim();
-  // If typo has descriptions, try to extract first valid font name
-  if (kvTypo) {
-    // Take only the first font from comma-separated list
-    const firstFont = kvTypo.split(',')[0].trim();
-    // Remove descriptors like "bold", "elegante", "sans-serif"
-    const cleaned = firstFont.replace(/\b(bold|regular|light|elegante|moderno|serif|sans-serif|sans serif)\b/gi, '').trim();
-    kvTypo = cleaned || firstFont;
+  // ─── TIPOGRAFÍA con Google Fonts embebida en cada SVG ───
+  // Sanitiza nombre y arma URL de Google Fonts
+  let kvTypoRaw = (kv.typo || '').trim();
+  let fontName = '';
+  if (kvTypoRaw) {
+    const firstFont = kvTypoRaw.split(',')[0].trim();
+    fontName = firstFont.replace(/\b(bold|regular|light|elegante|moderno|serif|sans-serif|sans serif|display|condensed|extended)\b/gi, '').trim();
   }
-  const titleFont = kvTypo ? `'${kvTypo}', 'Arial Black', sans-serif` : "'Arial Black', sans-serif";
-  const bodyFont = kvTypo ? `'${kvTypo}', Arial, sans-serif` : "Arial, sans-serif";
   
-  // Get short copy (first sentence or 60 chars)
-  const shortCopy = post.copy.split(/[.\n]/)[0].trim().slice(0, 90);
+  // Si no hay tipo o es muy genérica, usar Inter por defecto
+  const finalFont = fontName && fontName.length > 2 ? fontName : 'Inter';
+  const fontUrlName = finalFont.replace(/\s+/g, '+');
+  const titleFont = `'${finalFont}', 'Arial Black', sans-serif`;
+  const bodyFont = `'${finalFont}', Arial, sans-serif`;
+  
+  // Embed Google Fonts en cada SVG via @import
+  const fontImport = `<defs><style>@import url('https://fonts.googleapis.com/css2?family=${fontUrlName}:wght@400;700;900&amp;display=swap');</style></defs>`;
+  
+  const shortCopy = (post.copy || '').split(/[.\n]/)[0].trim().slice(0, 90);
   const conceptoShort = concepto.slice(0, 60);
+  const words = conceptoShort.split(' ');
+  const word1 = words.slice(0, 2).join(' ').toUpperCase();
+  const word2 = words.slice(2, 4).join(' ').toUpperCase();
+  const word3 = words.slice(4, 6).join(' ').toUpperCase();
   
   const pieces = [];
   
-  // ─── PIEZA 1: HERO BOLD ───
+  // ─── PIEZA 1: HERO MAGAZINE — Tipografía gigante editorial ───
   pieces.push({
-    name: 'Hero Bold',
+    name: 'Hero Magazine',
     format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice">
-      <rect width="${W}" height="${H}" fill="${dark}"/>
-      <circle cx="${W*0.85}" cy="${H*0.15}" r="${W*0.4}" fill="${primary}" opacity="0.6"/>
-      <circle cx="${W*0.15}" cy="${H*0.85}" r="${W*0.3}" fill="${accent}" opacity="0.4"/>
-      <rect x="80" y="${H*0.5 - 80}" width="6" height="160" fill="${accent}"/>
-      <text x="110" y="${H*0.5 - 30}" font-family="${titleFont}" font-size="${W*0.075}" font-weight="900" fill="${light}" letter-spacing="-2">${escapeXML(conceptoShort.split(' ').slice(0,3).join(' ').toUpperCase())}</text>
-      <text x="110" y="${H*0.5 + 30}" font-family="${titleFont}" font-size="${W*0.075}" font-weight="900" fill="${primary}" letter-spacing="-2">${escapeXML(conceptoShort.split(' ').slice(3,6).join(' ').toUpperCase())}</text>
-      <text x="110" y="${H*0.5 + 90}" font-family="${bodyFont}" font-size="${W*0.022}" font-weight="400" fill="${light}" opacity="0.8">${escapeXML(shortCopy.slice(0,60))}</text>
-    </svg>`
-  });
-  
-  // ─── PIEZA 2: SPLIT 60/40 ───
-  pieces.push({
-    name: 'Split 60/40',
-    format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-      <rect width="${W*0.6}" height="${H}" fill="${primary}"/>
-      <rect x="${W*0.6}" width="${W*0.4}" height="${H}" fill="${light}"/>
-      <text x="80" y="${H*0.4}" font-family="${titleFont}" font-size="${W*0.06}" font-weight="900" fill="${light}" letter-spacing="-2">
-        <tspan x="80" dy="0">${escapeXML(conceptoShort.split(' ').slice(0,2).join(' ').toUpperCase())}</tspan>
-        <tspan x="80" dy="${W*0.07}">${escapeXML(conceptoShort.split(' ').slice(2,4).join(' ').toUpperCase())}</tspan>
-      </text>
-      <line x1="80" y1="${H*0.55}" x2="${W*0.25}" y2="${H*0.55}" stroke="${accent}" stroke-width="3"/>
-      <text x="80" y="${H*0.62}" font-family="${bodyFont}" font-size="${W*0.018}" fill="${light}" opacity="0.9">
-        <tspan x="80" dy="0">${escapeXML(shortCopy.slice(0,40))}</tspan>
-        <tspan x="80" dy="28">${escapeXML(shortCopy.slice(40,80))}</tspan>
-      </text>
-      <rect x="${W*0.65}" y="${H*0.35}" width="${W*0.25}" height="${W*0.25}" fill="${dark}" opacity="0.1"/>
-      <circle cx="${W*0.775}" cy="${H*0.475}" r="${W*0.06}" fill="${accent}"/>
-    </svg>`
-  });
-  
-  // ─── PIEZA 3: EDITORIAL TYPE ───
-  pieces.push({
-    name: 'Editorial Type',
-    format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
       <rect width="${W}" height="${H}" fill="${light}"/>
-      <text x="80" y="120" font-family="${bodyFont}" font-size="${W*0.013}" fill="${dark}" letter-spacing="3" font-weight="700">— ${escapeXML((post.format || 'POSTEO').toUpperCase())}</text>
-      <text x="80" y="${H*0.55}" font-family="${titleFont}" font-size="${W*0.085}" font-weight="400" fill="${dark}" letter-spacing="-3">
-        <tspan x="80" dy="0" font-style="italic">${escapeXML(conceptoShort.split(' ').slice(0,2).join(' '))}</tspan>
-        <tspan x="80" dy="${W*0.095}" font-weight="900">${escapeXML(conceptoShort.split(' ').slice(2,4).join(' '))}</tspan>
-      </text>
-      <rect x="80" y="${H*0.7}" width="120" height="2" fill="${primary}"/>
-      <text x="80" y="${H*0.78}" font-family="${bodyFont}" font-size="${W*0.018}" fill="${dark}" opacity="0.7">${escapeXML(shortCopy.slice(0,80))}</text>
+      <text x="80" y="200" font-family="${titleFont}" font-size="32" font-weight="700" fill="${dark}" letter-spacing="6" opacity="0.5">${escapeXML(word1 || 'EDITORIAL')}</text>
+      <line x1="80" y1="240" x2="${W-80}" y2="240" stroke="${dark}" stroke-width="2"/>
+      <text x="80" y="${H*0.5}" font-family="${titleFont}" font-size="${W*0.13}" font-weight="900" fill="${dark}" letter-spacing="-8">${escapeXML(word1)}</text>
+      <text x="80" y="${H*0.5 + W*0.14}" font-family="${titleFont}" font-size="${W*0.13}" font-weight="900" fill="${primary}" letter-spacing="-8" font-style="italic">${escapeXML(word2)}</text>
+      <text x="80" y="${H*0.5 + W*0.28}" font-family="${titleFont}" font-size="${W*0.13}" font-weight="900" fill="${dark}" letter-spacing="-8">${escapeXML(word3)}</text>
+      <text x="80" y="${H - 120}" font-family="${bodyFont}" font-size="22" fill="${dark}" opacity="0.7" letter-spacing="2">${escapeXML(shortCopy.toUpperCase().slice(0, 70))}</text>
+      <line x1="80" y1="${H - 80}" x2="200" y2="${H - 80}" stroke="${primary}" stroke-width="3"/>
     </svg>`
   });
   
-  // ─── PIEZA 4: BIG NUMBER ───
+  // ─── PIEZA 2: BRUTALIST GRID — Tipografía rota en grilla ───
+  pieces.push({
+    name: 'Brutalist Grid',
+    format: `${W}×${H}`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
+      <rect width="${W}" height="${H}" fill="${dark}"/>
+      <rect x="60" y="60" width="${W-120}" height="${H-120}" fill="none" stroke="${light}" stroke-width="2"/>
+      <line x1="${W*0.5}" y1="60" x2="${W*0.5}" y2="${H-60}" stroke="${light}" stroke-width="2"/>
+      <line x1="60" y1="${H*0.5}" x2="${W-60}" y2="${H*0.5}" stroke="${light}" stroke-width="2"/>
+      <text x="${W*0.25}" y="${H*0.28}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.16}" font-weight="900" fill="${primary}">${escapeXML(word1.slice(0,3))}</text>
+      <text x="${W*0.75}" y="${H*0.28}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.16}" font-weight="900" fill="${light}">${escapeXML(word2.slice(0,3))}</text>
+      <text x="${W*0.25}" y="${H*0.78}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.16}" font-weight="900" fill="${accent}">${escapeXML(word3.slice(0,3))}</text>
+      <text x="${W*0.75}" y="${H*0.78}" text-anchor="middle" font-family="${bodyFont}" font-size="${W*0.04}" font-weight="700" fill="${light}">${escapeXML(shortCopy.slice(0,30))}</text>
+    </svg>`
+  });
+  
+  // ─── PIEZA 3: MINIMAL TYPE — Una palabra gigante, mucho aire ───
+  pieces.push({
+    name: 'Minimal Type',
+    format: `${W}×${H}`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
+      <rect width="${W}" height="${H}" fill="${primary}"/>
+      <text x="${W*0.08}" y="120" font-family="${bodyFont}" font-size="22" font-weight="400" fill="${light}" letter-spacing="8" opacity="0.6">— ${escapeXML((post.format || 'POST').toUpperCase())}</text>
+      <text x="${W*0.08}" y="${H*0.55}" font-family="${titleFont}" font-size="${W*0.32}" font-weight="900" fill="${light}" letter-spacing="-12">${escapeXML(word1.split(' ')[0] || '')}</text>
+      <line x1="${W*0.08}" y1="${H*0.62}" x2="${W*0.5}" y2="${H*0.62}" stroke="${light}" stroke-width="4"/>
+      <text x="${W*0.08}" y="${H*0.7}" font-family="${bodyFont}" font-size="28" font-weight="400" fill="${light}" letter-spacing="2" opacity="0.85">${escapeXML(shortCopy.slice(0, 60))}</text>
+      <text x="${W*0.08}" y="${H - 80}" font-family="${bodyFont}" font-size="14" fill="${light}" opacity="0.5" letter-spacing="3">— SCROLL —</text>
+    </svg>`
+  });
+  
+  // ─── PIEZA 4: SPLIT DIAGONAL — Composición dinámica ───
+  pieces.push({
+    name: 'Split Diagonal',
+    format: `${W}×${H}`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
+      <polygon points="0,0 ${W},0 ${W},${H*0.65} 0,${H*0.85}" fill="${dark}"/>
+      <polygon points="0,${H*0.85} ${W},${H*0.65} ${W},${H} 0,${H}" fill="${primary}"/>
+      <circle cx="${W*0.78}" cy="${H*0.3}" r="${W*0.18}" fill="${accent}" opacity="0.85"/>
+      <text x="${W*0.08}" y="${H*0.4}" font-family="${titleFont}" font-size="${W*0.085}" font-weight="900" fill="${light}" letter-spacing="-3">${escapeXML(word1)}</text>
+      <text x="${W*0.08}" y="${H*0.4 + W*0.09}" font-family="${titleFont}" font-size="${W*0.085}" font-weight="900" fill="${accent}" letter-spacing="-3" font-style="italic">${escapeXML(word2)}</text>
+      <text x="${W*0.08}" y="${H*0.4 + W*0.18}" font-family="${titleFont}" font-size="${W*0.085}" font-weight="900" fill="${light}" letter-spacing="-3">${escapeXML(word3)}</text>
+      <text x="${W*0.08}" y="${H*0.93}" font-family="${bodyFont}" font-size="22" font-weight="700" fill="${light}" letter-spacing="2">${escapeXML(shortCopy.toUpperCase().slice(0, 50))}</text>
+    </svg>`
+  });
+  
+  // ─── PIEZA 5: BIG QUOTE — Tipografía como protagonista ───
+  pieces.push({
+    name: 'Big Quote',
+    format: `${W}×${H}`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
+      <rect width="${W}" height="${H}" fill="${light}"/>
+      <text x="${W*0.5}" y="${H*0.22}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.4}" font-weight="900" fill="${primary}" opacity="0.15">"</text>
+      <rect x="${W*0.1}" y="${H*0.42}" width="${W*0.8}" height="2" fill="${dark}"/>
+      <text x="${W*0.5}" y="${H*0.52}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.07}" font-weight="700" fill="${dark}" letter-spacing="-2">${escapeXML(word1)}</text>
+      <text x="${W*0.5}" y="${H*0.52 + W*0.08}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.07}" font-weight="700" fill="${primary}" letter-spacing="-2" font-style="italic">${escapeXML(word2)}</text>
+      <text x="${W*0.5}" y="${H*0.52 + W*0.16}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.07}" font-weight="700" fill="${dark}" letter-spacing="-2">${escapeXML(word3)}</text>
+      <rect x="${W*0.1}" y="${H*0.82}" width="${W*0.8}" height="2" fill="${dark}"/>
+      <text x="${W*0.5}" y="${H*0.88}" text-anchor="middle" font-family="${bodyFont}" font-size="20" fill="${dark}" letter-spacing="6" opacity="0.7">${escapeXML(shortCopy.toUpperCase().slice(0, 40))}</text>
+    </svg>`
+  });
+  
+  // ─── PIEZA 6: NUMBERED LIST — Editorial con número ───
   pieces.push({
     name: 'Big Number',
     format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
       <rect width="${W}" height="${H}" fill="${dark}"/>
-      <text x="${W*0.5}" y="${H*0.55}" font-family="${titleFont}" font-size="${W*0.45}" font-weight="900" fill="${primary}" text-anchor="middle" letter-spacing="-20" opacity="0.9">${escapeXML((post.id || '01').toString().padStart(2,'0'))}</text>
-      <text x="${W*0.5}" y="${H*0.82}" font-family="${titleFont}" font-size="${W*0.04}" font-weight="900" fill="${light}" text-anchor="middle" letter-spacing="-1">${escapeXML(conceptoShort.toUpperCase().slice(0,30))}</text>
-      <text x="${W*0.5}" y="${H*0.87}" font-family="${bodyFont}" font-size="${W*0.016}" fill="${accent}" text-anchor="middle" letter-spacing="3" font-weight="700">— ${escapeXML((post.pilar || 'PILAR').toUpperCase())}</text>
+      <rect x="0" y="0" width="${W*0.4}" height="${H}" fill="${primary}"/>
+      <text x="${W*0.2}" y="${H*0.55}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.5}" font-weight="900" fill="${light}" letter-spacing="-20">01</text>
+      <text x="${W*0.2}" y="${H*0.65}" text-anchor="middle" font-family="${bodyFont}" font-size="20" font-weight="700" fill="${light}" letter-spacing="6">CAPÍTULO</text>
+      <text x="${W*0.45}" y="${H*0.4}" font-family="${bodyFont}" font-size="14" fill="${accent}" letter-spacing="4" font-weight="700">— PARTE UNO</text>
+      <text x="${W*0.45}" y="${H*0.5}" font-family="${titleFont}" font-size="${W*0.06}" font-weight="900" fill="${light}" letter-spacing="-2">${escapeXML(word1)}</text>
+      <text x="${W*0.45}" y="${H*0.5 + W*0.07}" font-family="${titleFont}" font-size="${W*0.06}" font-weight="900" fill="${light}" letter-spacing="-2">${escapeXML(word2)}</text>
+      <text x="${W*0.45}" y="${H*0.5 + W*0.14}" font-family="${titleFont}" font-size="${W*0.06}" font-weight="900" fill="${accent}" letter-spacing="-2" font-style="italic">${escapeXML(word3)}</text>
+      <text x="${W*0.45}" y="${H*0.78}" font-family="${bodyFont}" font-size="18" fill="${light}" opacity="0.7">${escapeXML(shortCopy.slice(0, 60))}</text>
     </svg>`
   });
   
-  // ─── PIEZA 5: GRID 4 ───
+  // ─── PIEZA 7: STRIPES MAXIMALIST — Capas y franjas ───
   pieces.push({
-    name: 'Grid 2×2',
+    name: 'Maximalist Stripes',
     format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-      <rect width="${W}" height="${H}" fill="${dark}"/>
-      <rect x="0" y="0" width="${W*0.5}" height="${H*0.5}" fill="${primary}"/>
-      <rect x="${W*0.5}" y="0" width="${W*0.5}" height="${H*0.5}" fill="${light}"/>
-      <rect x="0" y="${H*0.5}" width="${W*0.5}" height="${H*0.5}" fill="${accent}"/>
-      <rect x="${W*0.5}" y="${H*0.5}" width="${W*0.5}" height="${H*0.5}" fill="${secondary}"/>
-      <text x="${W*0.25}" y="${H*0.28}" font-family="${titleFont}" font-size="${W*0.04}" font-weight="900" fill="${light}" text-anchor="middle">01</text>
-      <text x="${W*0.75}" y="${H*0.28}" font-family="${titleFont}" font-size="${W*0.04}" font-weight="900" fill="${dark}" text-anchor="middle">02</text>
-      <text x="${W*0.25}" y="${H*0.78}" font-family="${titleFont}" font-size="${W*0.04}" font-weight="900" fill="${dark}" text-anchor="middle">03</text>
-      <text x="${W*0.75}" y="${H*0.78}" font-family="${titleFont}" font-size="${W*0.04}" font-weight="900" fill="${light}" text-anchor="middle">04</text>
-      <rect x="${W*0.45}" y="${H*0.45}" width="${W*0.1}" height="${W*0.1}" fill="${dark}"/>
-      <text x="${W*0.5}" y="${H*0.515}" font-family="${titleFont}" font-size="${W*0.025}" fill="${light}" text-anchor="middle">+</text>
-    </svg>`
-  });
-  
-  // ─── PIEZA 6: MINIMAL CIRCLE ───
-  pieces.push({
-    name: 'Minimal Circle',
-    format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
       <rect width="${W}" height="${H}" fill="${light}"/>
-      <circle cx="${W*0.5}" cy="${H*0.42}" r="${W*0.28}" fill="${primary}"/>
-      <circle cx="${W*0.5}" cy="${H*0.42}" r="${W*0.16}" fill="${accent}"/>
-      <text x="${W*0.5}" y="${H*0.74}" font-family="${titleFont}" font-size="${W*0.05}" font-weight="900" fill="${dark}" text-anchor="middle" letter-spacing="-1">${escapeXML(conceptoShort.split(' ').slice(0,3).join(' ').toUpperCase().slice(0,30))}</text>
-      <line x1="${W*0.4}" y1="${H*0.78}" x2="${W*0.6}" y2="${H*0.78}" stroke="${primary}" stroke-width="2"/>
-      <text x="${W*0.5}" y="${H*0.83}" font-family="${bodyFont}" font-size="${W*0.016}" fill="${dark}" text-anchor="middle" opacity="0.7">${escapeXML(shortCopy.slice(0,60))}</text>
+      <rect x="0" y="${H*0.1}" width="${W}" height="${H*0.08}" fill="${primary}"/>
+      <rect x="0" y="${H*0.2}" width="${W}" height="${H*0.04}" fill="${accent}"/>
+      <rect x="0" y="${H*0.78}" width="${W}" height="${H*0.04}" fill="${accent}"/>
+      <rect x="0" y="${H*0.84}" width="${W}" height="${H*0.08}" fill="${primary}"/>
+      <text x="${W*0.5}" y="${H*0.45}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.11}" font-weight="900" fill="${dark}" letter-spacing="-4">${escapeXML(word1)}</text>
+      <text x="${W*0.5}" y="${H*0.45 + W*0.12}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.11}" font-weight="900" fill="${primary}" letter-spacing="-4" font-style="italic">${escapeXML(word2)}</text>
+      <text x="${W*0.5}" y="${H*0.45 + W*0.24}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.11}" font-weight="900" fill="${dark}" letter-spacing="-4">${escapeXML(word3)}</text>
+      <text x="${W*0.5}" y="${H*0.7}" text-anchor="middle" font-family="${bodyFont}" font-size="20" fill="${dark}" letter-spacing="6" font-weight="700">${escapeXML(shortCopy.toUpperCase().slice(0, 50))}</text>
     </svg>`
   });
   
-  // ─── PIEZA 7: STRIPES ───
+  // ─── PIEZA 8: COLLAGE TYPE — Tipografía superpuesta ───
   pieces.push({
-    name: 'Stripes',
+    name: 'Collage Type',
     format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-      <rect width="${W}" height="${H}" fill="${dark}"/>
-      ${[0,1,2,3,4].map(i => `<rect x="${i*W/5}" y="0" width="${W/5}" height="${H}" fill="${[primary, light, accent, primary, secondary][i]}" opacity="${[0.85, 0.92, 0.85, 0.5, 0.7][i]}"/>`).join('')}
-      <rect x="${W*0.1}" y="${H*0.4}" width="${W*0.8}" height="${H*0.2}" fill="${dark}" opacity="0.85"/>
-      <text x="${W*0.5}" y="${H*0.5}" font-family="${titleFont}" font-size="${W*0.045}" font-weight="900" fill="${light}" text-anchor="middle" letter-spacing="-1">${escapeXML(conceptoShort.split(' ').slice(0,3).join(' ').toUpperCase().slice(0,28))}</text>
-      <text x="${W*0.5}" y="${H*0.55}" font-family="${bodyFont}" font-size="${W*0.018}" fill="${accent}" text-anchor="middle" letter-spacing="3" font-weight="700">— AVALON STUDIO —</text>
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
+      <rect width="${W}" height="${H}" fill="${secondary}"/>
+      <rect x="${W*0.1}" y="${H*0.15}" width="${W*0.55}" height="${H*0.35}" fill="${primary}" transform="rotate(-3 ${W*0.375} ${H*0.32})"/>
+      <rect x="${W*0.4}" y="${H*0.35}" width="${W*0.5}" height="${H*0.3}" fill="${accent}" transform="rotate(2 ${W*0.65} ${H*0.5})"/>
+      <text x="${W*0.16}" y="${H*0.32}" font-family="${titleFont}" font-size="${W*0.1}" font-weight="900" fill="${dark}" letter-spacing="-3" transform="rotate(-3 ${W*0.375} ${H*0.32})">${escapeXML(word1)}</text>
+      <text x="${W*0.45}" y="${H*0.5}" font-family="${titleFont}" font-size="${W*0.1}" font-weight="900" fill="${dark}" letter-spacing="-3" transform="rotate(2 ${W*0.65} ${H*0.5})">${escapeXML(word2)}</text>
+      <text x="${W*0.5}" y="${H*0.78}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.13}" font-weight="900" fill="${light}" letter-spacing="-4">${escapeXML(word3)}</text>
+      <text x="${W*0.5}" y="${H*0.88}" text-anchor="middle" font-family="${bodyFont}" font-size="18" fill="${light}" letter-spacing="4" opacity="0.7">${escapeXML(shortCopy.toUpperCase().slice(0, 50))}</text>
     </svg>`
   });
   
-  // ─── PIEZA 8: QUOTE FRAME ───
+  // ─── PIEZA 9: VERTICAL ASYMMETRIC — Lateral fuerte ───
   pieces.push({
-    name: 'Quote Frame',
+    name: 'Vertical Type',
     format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-      <rect width="${W}" height="${H}" fill="${primary}"/>
-      <rect x="60" y="60" width="${W-120}" height="${H-120}" fill="none" stroke="${light}" stroke-width="1"/>
-      <text x="120" y="180" font-family="${titleFont}" font-size="${W*0.18}" fill="${accent}" font-weight="900" opacity="0.9">"</text>
-      <text x="120" y="${H*0.5}" font-family="${titleFont}" font-size="${W*0.045}" font-weight="400" fill="${light}" letter-spacing="-1">
-        <tspan x="120" dy="0">${escapeXML(shortCopy.slice(0,30))}</tspan>
-        <tspan x="120" dy="${W*0.055}">${escapeXML(shortCopy.slice(30,60))}</tspan>
-        <tspan x="120" dy="${W*0.055}" font-weight="900" font-style="italic">${escapeXML(shortCopy.slice(60,90))}</tspan>
-      </text>
-      <line x1="120" y1="${H*0.78}" x2="220" y2="${H*0.78}" stroke="${accent}" stroke-width="3"/>
-      <text x="120" y="${H*0.82}" font-family="${bodyFont}" font-size="${W*0.016}" fill="${light}" letter-spacing="2" font-weight="700">— ${escapeXML((post.pilar || 'AVALON').toUpperCase())}</text>
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
+      <rect width="${W}" height="${H}" fill="${light}"/>
+      <rect x="0" y="0" width="${W*0.18}" height="${H}" fill="${dark}"/>
+      <text x="${W*0.09}" y="${H*0.3}" text-anchor="middle" font-family="${bodyFont}" font-size="20" font-weight="900" fill="${light}" letter-spacing="14" transform="rotate(-90 ${W*0.09} ${H*0.5})">${escapeXML((post.format || 'POST').toUpperCase().slice(0, 12))}</text>
+      <circle cx="${W*0.85}" cy="${H*0.2}" r="${W*0.1}" fill="${primary}"/>
+      <rect x="${W*0.3}" y="${H*0.25}" width="${W*0.6}" height="6" fill="${primary}"/>
+      <text x="${W*0.3}" y="${H*0.45}" font-family="${titleFont}" font-size="${W*0.085}" font-weight="900" fill="${dark}" letter-spacing="-3">${escapeXML(word1)}</text>
+      <text x="${W*0.3}" y="${H*0.45 + W*0.09}" font-family="${titleFont}" font-size="${W*0.085}" font-weight="900" fill="${primary}" letter-spacing="-3">${escapeXML(word2)}</text>
+      <text x="${W*0.3}" y="${H*0.45 + W*0.18}" font-family="${titleFont}" font-size="${W*0.085}" font-weight="900" fill="${dark}" letter-spacing="-3" font-style="italic">${escapeXML(word3)}</text>
+      <line x1="${W*0.3}" y1="${H*0.75}" x2="${W*0.7}" y2="${H*0.75}" stroke="${primary}" stroke-width="3"/>
+      <text x="${W*0.3}" y="${H*0.83}" font-family="${bodyFont}" font-size="18" fill="${dark}" letter-spacing="2" opacity="0.7">${escapeXML(shortCopy.slice(0, 60))}</text>
     </svg>`
   });
   
-  // ─── PIEZA 9: CTA STRONG ───
+  // ─── PIEZA 10: GRADIENT BOLD — Color blocking creativo ───
   pieces.push({
-    name: 'CTA Strong',
+    name: 'Gradient Bold',
     format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">${fontImport}
       <defs>
-        <linearGradient id="grad${post.id||0}" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id="gr-${seed}" x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stop-color="${primary}"/>
           <stop offset="100%" stop-color="${accent}"/>
         </linearGradient>
       </defs>
-      <rect width="${W}" height="${H}" fill="url(#grad${post.id||0})"/>
-      <circle cx="${W*0.85}" cy="${H*0.15}" r="80" fill="${light}" opacity="0.15"/>
-      <circle cx="${W*0.15}" cy="${H*0.85}" r="120" fill="${dark}" opacity="0.2"/>
-      <text x="${W*0.5}" y="${H*0.4}" font-family="${bodyFont}" font-size="${W*0.018}" fill="${light}" text-anchor="middle" letter-spacing="4" font-weight="700" opacity="0.85">— ${escapeXML((post.pilar || 'PILAR').toUpperCase())} —</text>
-      <text x="${W*0.5}" y="${H*0.5}" font-family="${titleFont}" font-size="${W*0.075}" font-weight="900" fill="${light}" text-anchor="middle" letter-spacing="-2">${escapeXML(conceptoShort.split(' ').slice(0,3).join(' ').toUpperCase().slice(0,25))}</text>
-      <rect x="${W*0.35}" y="${H*0.62}" width="${W*0.3}" height="60" fill="${light}"/>
-      <text x="${W*0.5}" y="${H*0.62 + 38}" font-family="${titleFont}" font-size="${W*0.022}" fill="${dark}" text-anchor="middle" letter-spacing="2" font-weight="900">CONOCÉ MÁS →</text>
-    </svg>`
-  });
-  
-  // ─── PIEZA 10: LIST ───
-  pieces.push({
-    name: 'List 3 Items',
-    format: `${W}×${H}`,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}">
-      <rect width="${W}" height="${H}" fill="${light}"/>
-      <text x="80" y="120" font-family="${bodyFont}" font-size="${W*0.014}" fill="${primary}" letter-spacing="3" font-weight="700">— ${escapeXML((post.pilar || 'PILAR').toUpperCase())}</text>
-      <text x="80" y="190" font-family="${titleFont}" font-size="${W*0.05}" font-weight="900" fill="${dark}" letter-spacing="-2">${escapeXML(conceptoShort.split(' ').slice(0,3).join(' ').toUpperCase())}</text>
-      <line x1="80" y1="240" x2="${W-80}" y2="240" stroke="${dark}" stroke-width="1" opacity="0.15"/>
-      ${[0,1,2].map(i => `
-        <text x="80" y="${340 + i*180}" font-family="${titleFont}" font-size="${W*0.04}" font-weight="900" fill="${primary}">0${i+1}</text>
-        <text x="180" y="${330 + i*180}" font-family="${titleFont}" font-size="${W*0.025}" font-weight="900" fill="${dark}" letter-spacing="-1">${escapeXML(['CARACTERÍSTICA','BENEFICIO','RESULTADO'][i])}</text>
-        <text x="180" y="${365 + i*180}" font-family="${bodyFont}" font-size="${W*0.016}" fill="${dark}" opacity="0.7">${escapeXML(shortCopy.slice(i*30, i*30+50))}</text>
-        <line x1="80" y1="${405 + i*180}" x2="${W-80}" y2="${405 + i*180}" stroke="${dark}" stroke-width="1" opacity="0.1"/>
-      `).join('')}
+      <rect width="${W}" height="${H}" fill="url(#gr-${seed})"/>
+      <circle cx="${W*0.15}" cy="${H*0.15}" r="${W*0.05}" fill="${light}" opacity="0.3"/>
+      <circle cx="${W*0.85}" cy="${H*0.85}" r="${W*0.08}" fill="${dark}" opacity="0.2"/>
+      <text x="${W*0.5}" y="${H*0.15}" text-anchor="middle" font-family="${bodyFont}" font-size="18" fill="${light}" letter-spacing="8" font-weight="700" opacity="0.8">— ${escapeXML((post.pilar || 'CONCEPT').toUpperCase())} —</text>
+      <text x="${W*0.5}" y="${H*0.45}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.13}" font-weight="900" fill="${light}" letter-spacing="-6">${escapeXML(word1)}</text>
+      <text x="${W*0.5}" y="${H*0.45 + W*0.14}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.13}" font-weight="900" fill="${dark}" letter-spacing="-6" font-style="italic">${escapeXML(word2)}</text>
+      <text x="${W*0.5}" y="${H*0.45 + W*0.28}" text-anchor="middle" font-family="${titleFont}" font-size="${W*0.13}" font-weight="900" fill="${light}" letter-spacing="-6">${escapeXML(word3)}</text>
+      <rect x="${W*0.4}" y="${H*0.85}" width="${W*0.2}" height="3" fill="${light}"/>
+      <text x="${W*0.5}" y="${H*0.92}" text-anchor="middle" font-family="${bodyFont}" font-size="16" fill="${light}" letter-spacing="3" opacity="0.9">${escapeXML(shortCopy.toUpperCase().slice(0, 50))}</text>
     </svg>`
   });
   

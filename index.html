@@ -1657,16 +1657,13 @@ Copy: Tecnología silenciosa para espacios que respiran..." style="min-height:26
 </div>
 
 <!-- ═══ AI SELECTOR BAR ═══ -->
-<div style="position:fixed;top:20px;right:20px;z-index:999;background:rgba(13,13,24,0.95);backdrop-filter:blur(20px);border:1px solid rgba(125,3,255,0.3);border-radius:12px;padding:12px 16px;box-shadow:0 8px 24px rgba(0,0,0,0.3);">
-  <div style="display:flex;align-items:center;gap:12px;font-family:'Unbounded',sans-serif;font-size:10px;">
+<div id="aiSelectorBar" style="position:fixed;top:16px;right:16px;z-index:90;background:rgba(13,13,24,0.85);backdrop-filter:blur(20px);border:1px solid rgba(125,3,255,0.25);border-radius:10px;padding:8px 12px;box-shadow:0 4px 16px rgba(0,0,0,0.25);">
+  <div style="display:flex;align-items:center;gap:10px;font-family:'Unbounded',sans-serif;font-size:9px;">
     <span style="color:var(--text-muted);letter-spacing:0.1em;text-transform:uppercase;">IA:</span>
-    <select id="ai-selector" onchange="setPreferredAI(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:8px;font-family:'Poppins',sans-serif;font-size:11px;cursor:pointer;">
+    <select id="ai-selector" onchange="setPreferredAI(this.value)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-family:'Poppins',sans-serif;font-size:10px;cursor:pointer;">
       <option value="gemini">Gemini (Free)</option>
       <option value="claude">Claude</option>
     </select>
-    <button onclick="showAPIKeyModal()" style="background:var(--purple-dim);border:1px solid var(--purple);color:var(--purple);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:10px;font-weight:600;letter-spacing:0.05em;">
-      🔑 Keys
-    </button>
   </div>
 </div>
 
@@ -2980,65 +2977,71 @@ function generateKeywords(post, kv, client, seed) {
   const scene2 = scenes[(seed + 1) % scenes.length];
   const scene3 = scenes[(seed + 2) % scenes.length];
   
-  // ─── 4 CATEGORIES, each based on a STRUCTURE from the PDF ───
+  // ─── 5 CATEGORIES, each based on a STRUCTURE from the PDF ───
+  // IMPORTANTE: Cada keyword DEBE tener entre 3-6 palabras MAX
+  
+  // Helper: take only N words from a string
+  const take = (s, n) => s.split(/\s+/).slice(0, n).join(' ');
+  
   const categories = {
-    // CATEGORY 1: Estructura completa [acción] + [contexto] + [usuario] + [estilo visual]
-    // Ejemplo: "professional assisting client at desk modern office cinematic lighting"
+    // CATEGORY 1: Acción + Contexto + Estilo (compacto)
     'Estructura 1 · Acción + Contexto + Usuario + Estilo': [
-      `${scene1.action} ${scene1.context} ${audienceWord} ${kvLight}`,
-      `${scene2.action} ${scene2.context} ${audienceWord} ${kvAesthetic}`,
-      `${scene3.action} ${scene3.context} ${audienceWord} ${kvAttitude}`,
-      `${scene1.action} ${contexts[0]} ${audienceWord} ${kvColor}`,
-      `${scene2.action} ${scene2.context} ${audienceWord} ${kvLight} ${kvColor}`
+      `${take(scene1.action, 2)} ${take(scene1.context, 2)} ${kvLight.split(' ')[0]}`,
+      `${take(scene2.action, 2)} ${take(scene2.context, 2)} ${kvAesthetic.split(' ')[0]}`,
+      `${take(scene1.action, 2)} ${audienceWord} ${kvColor.split(' ')[0]}`,
+      `${take(scene3.action, 3)} ${kvLight}`,
+      `${audienceWord} ${take(scene1.context, 2)} ${kvAttitude.split(' ')[0]}`
     ],
     
-    // CATEGORY 2: Estructura [estilo visual] + [contexto]
-    // Ejemplo: "cinematic lighting office", "soft light home interior"
+    // CATEGORY 2: Estilo + Contexto (3-5 palabras)
     'Estructura 2 · Estilo + Contexto': [
-      `${kvLight} ${scene1.context}`,
-      `${kvAesthetic} ${scene2.context}`,
+      `${kvLight} ${take(scene1.context, 2)}`,
+      `${kvAesthetic} ${take(scene2.context, 2)}`,
       `${kvColor} ${contexts[0]}`,
       `${lights[0]} ${contexts[1]}`,
-      `${kvLight} ${kvColor} ${scene1.context}`
+      `${kvLight} ${take(scene1.context, 2)} ${kvColor.split(' ')[0]}`
     ],
     
-    // CATEGORY 3: Estructura [estilo visual] solo
-    // Ejemplo: "abstract, modern colors, cinematic lighting, soft lighting"
+    // CATEGORY 3: Solo estilo (3-5 palabras con comas)
     'Estructura 3 · Estilo visual puro': [
-      `${kvLight}, ${kvColor}, ${kvAesthetic}`,
-      `${kvLight}, ${kvAttitude}, ${compositions[0]}`,
-      `${aesthetics[0]}, ${colors[0]}, ${kvLight}`,
-      `${kvAesthetic}, ${kvColor}, soft shadows, high detail`,
-      `${kvLight}, ${kvColor}, ${aesthetics[1]}, film grain`
+      `${kvLight}, ${kvColor}`,
+      `${kvAesthetic}, ${kvAttitude}`,
+      `${aesthetics[0]}, ${colors[0]}`,
+      `${kvAesthetic}, ${kvColor}, soft shadows`,
+      `${kvLight}, film grain`
     ],
     
-    // CATEGORY 4: Estructura [contexto] + [usuario]
-    // Ejemplo: "modern office professional and client"
+    // CATEGORY 4: Contexto + Usuario (3-5 palabras)
     'Estructura 4 · Contexto + Usuario': [
-      `${scene1.context} ${audienceWord}`,
-      `${scene2.context} ${audienceWord}`,
+      `${take(scene1.context, 2)} ${audienceWord}`,
+      `${take(scene2.context, 2)} ${audienceWord}`,
       `${contexts[0]} ${audienceWord}`,
-      `${scene1.context} ${audienceWord} and client`,
-      `${scene3.context} ${audienceWord} ${kvAttitude}`
+      `${take(scene1.context, 2)} ${audienceWord} client`,
+      `${take(scene3.context, 2)} ${audienceWord}`
     ],
     
-    // CATEGORY 5: Estructura [acción] + [contexto]
-    // Ejemplo: "working on laptop in cafe"
+    // CATEGORY 5: Acción + Contexto (3-5 palabras)
     'Estructura 5 · Acción + Contexto': [
-      `${scene1.action} ${scene1.context}`,
-      `${scene2.action} ${scene2.context}`,
-      `${scene3.action} ${scene3.context}`,
-      `${scene1.action} in ${contexts[0]}`,
-      `${scene2.action} ${kvLight}`
+      `${take(scene1.action, 2)} ${take(scene1.context, 2)}`,
+      `${take(scene2.action, 2)} ${take(scene2.context, 2)}`,
+      `${take(scene3.action, 2)} ${take(scene3.context, 2)}`,
+      `${take(scene1.action, 2)} in ${contexts[0]}`,
+      `${take(scene2.action, 2)} ${kvLight.split(' ')[0]}`
     ]
   };
   
-  // Clean up: trim, dedupe, cap at 5 each
+  // Clean up: trim, dedupe, cap at 5 each + LIMIT WORD COUNT (3-6 words max)
   Object.keys(categories).forEach(k => {
     categories[k] = [...new Set(
       categories[k]
         .map(q => q.replace(/\s+/g, ' ').trim())
         .filter(q => q.length > 5)
+        .map(q => {
+          // Trim to max 6 words
+          const words = q.split(/\s+/);
+          return words.length > 6 ? words.slice(0, 6).join(' ') : q;
+        })
+        .filter(q => q.split(/\s+/).length >= 2)
     )].slice(0, 5);
   });
   
@@ -3464,9 +3467,18 @@ function generateDesignPieces(post, kv, seed = 0) {
   const H = designSize === 'story' ? 1920 : 1440;
   
   // Use client typography if set, fallback to Arial Black
-  const kvTypo = (kv.typo || '').trim();
-  const titleFont = kvTypo ? `${kvTypo}, Arial Black, sans-serif` : 'Arial Black, sans-serif';
-  const bodyFont = kvTypo ? `${kvTypo}, Arial, sans-serif` : 'Arial, sans-serif';
+  // Sanitize: extract just font names (remove descriptions like "bold", "elegante")
+  let kvTypo = (kv.typo || '').trim();
+  // If typo has descriptions, try to extract first valid font name
+  if (kvTypo) {
+    // Take only the first font from comma-separated list
+    const firstFont = kvTypo.split(',')[0].trim();
+    // Remove descriptors like "bold", "elegante", "sans-serif"
+    const cleaned = firstFont.replace(/\b(bold|regular|light|elegante|moderno|serif|sans-serif|sans serif)\b/gi, '').trim();
+    kvTypo = cleaned || firstFont;
+  }
+  const titleFont = kvTypo ? `'${kvTypo}', 'Arial Black', sans-serif` : "'Arial Black', sans-serif";
+  const bodyFont = kvTypo ? `'${kvTypo}', Arial, sans-serif` : "Arial, sans-serif";
   
   // Get short copy (first sentence or 60 chars)
   const shortCopy = post.copy.split(/[.\n]/)[0].trim().slice(0, 90);
@@ -3693,7 +3705,7 @@ async function generateResults() {
     post: p,
     keywords: generateKeywords(p, kv, cl, 1),
     keywordSeed: 1,
-    prompts: generatePrompts(p, kv, cl, 0, 1, promptQuestionnaire[p.id] || {}),
+    prompts: generatePrompts(p, kv, cl, 0, 1, promptQuestionnaire[posts.indexOf(p)] || {}),
     promptSeeds: { firefly: 0, gemini: 0, chatgpt: 0 },
     promptDetail: { firefly: 1, gemini: 1, chatgpt: 1 },
     designs: generateDesignPieces(p, kv, 0),
@@ -3713,10 +3725,18 @@ async function generateResults() {
     document.body.style.overflow = '';
   }, 200);
   
-  // ─── BACKGROUND: Intentar mejorar SVGs con Gemini ───
-  allResults.forEach((r, idx) => {
-    fetchAIDesigns(idx, r.post, kv, cl).catch(e => console.log('AI SVG fallback used for post', idx));
-  });
+  // ─── BACKGROUND: Mejorar SVGs con Gemini (de a uno para evitar rate limit) ───
+  // Throttled: 1 request cada 1.5 segundos
+  (async () => {
+    for (let idx = 0; idx < allResults.length; idx++) {
+      try {
+        await fetchAIDesigns(idx, allResults[idx].post, kv, cl);
+      } catch (e) {
+        console.log('AI SVG fallback used for post', idx);
+      }
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  })();
 }
 
 function renderResults(results, client) {
@@ -4301,7 +4321,15 @@ function renderPromptsSection(idx, prompts) {
       
       <div class="prompt-grid">
         ${tools.map(t => {
+          // Show inline regex translation as placeholder while AI translates in background
           const esPrompt = quickTranslateToES(prompts[t.key]);
+          // Trigger AI translation after render
+          setTimeout(() => {
+            translateText(prompts[t.key], 'es').then(better => {
+              const el = document.getElementById(`pbes-${idx}-${t.key}`);
+              if (el && better && better !== prompts[t.key]) el.textContent = better;
+            }).catch(() => {});
+          }, 500 + Math.random() * 2000); // stagger requests
           return `
           <div class="prompt-card" id="pc-${idx}-${t.key}">
             <div class="prompt-head">
@@ -4435,36 +4463,65 @@ async function fetchAIDesigns(idx, post, kv, cl) {
       pilar: post.pilar || ''
     });
     
-    if (result.piezas && result.piezas.length > 0) {
-      // Validate each SVG
-      const validPieces = result.piezas.filter(p => {
-        return p.svg && p.svg.includes('<svg') && p.svg.includes('</svg>');
-      }).map(p => ({
-        name: p.name || 'IA Design',
-        format: '1080×1440',
-        svg: p.svg
-      }));
-      
-      if (validPieces.length >= 3) {
-        // Keep local pieces + add AI pieces
-        const existing = allResults[idx].designs;
-        allResults[idx].designs = [...validPieces, ...existing.slice(0, 4)];
-        
-        // Re-render designs section
-        const card = document.getElementById(`card-${idx}`);
-        if (card) {
-          const designSection = card.querySelector('[id^="dc-"]')?.parentElement;
-          if (designSection) {
-            designSection.outerHTML = renderDesignsSection(idx, allResults[idx].designs);
-            renderDesignSVGs(idx, allResults[idx].designs);
-          }
-        }
-        showToast(`✦ ${validPieces.length} piezas IA generadas para post ${idx + 1}`);
-      }
+    if (!result.piezas || !Array.isArray(result.piezas)) {
+      console.log('Invalid response structure for post', idx);
+      return;
     }
+    
+    // Validate and clean each SVG
+    const validPieces = result.piezas
+      .filter(p => p && p.svg && typeof p.svg === 'string')
+      .map(p => {
+        let svg = p.svg.trim();
+        // Ensure SVG is complete
+        if (!svg.includes('<svg') || !svg.includes('</svg>')) return null;
+        // Remove dangerous elements
+        svg = svg.replace(/<script[\s\S]*?<\/script>/gi, '');
+        svg = svg.replace(/<image[^>]*xlink:href=[^>]*>/gi, '');
+        svg = svg.replace(/<image[^>]*href="https?[^>]*>/gi, '');
+        svg = svg.replace(/on\w+="[^"]*"/gi, ''); // Remove event handlers
+        // Ensure xmlns attribute
+        if (!svg.includes('xmlns')) {
+          svg = svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+        }
+        // Detect format from viewBox
+        const vbMatch = svg.match(/viewBox="0 0 (\d+) (\d+)"/);
+        const w = vbMatch ? vbMatch[1] : '1080';
+        const h = vbMatch ? vbMatch[2] : '1080';
+        return {
+          name: (p.name || 'IA Design').slice(0, 30),
+          format: `${w}×${h}`,
+          svg: svg
+        };
+      })
+      .filter(Boolean);
+    
+    if (validPieces.length === 0) {
+      console.log('No valid pieces for post', idx);
+      return;
+    }
+    
+    // Merge: AI pieces first, then keep best local pieces
+    const existing = allResults[idx].designs;
+    allResults[idx].designs = [...validPieces, ...existing.slice(0, Math.max(7, 10 - validPieces.length))];
+    
+    // Re-render designs section + modal
+    const card = document.getElementById(`card-${idx}`);
+    if (card) {
+      const heroDesign = card.querySelector('.hero-design');
+      const oldOverlay = document.getElementById(`dvo-${idx}`);
+      
+      if (heroDesign) {
+        if (oldOverlay) oldOverlay.remove();
+        const newHTML = renderDesignsSection(idx, allResults[idx].designs);
+        heroDesign.outerHTML = newHTML;
+      }
+      // Render SVGs after DOM update
+      setTimeout(() => renderDesignSVGs(idx, allResults[idx].designs), 100);
+    }
+    showToast(`✦ ${validPieces.length} piezas IA · post ${idx + 1}`);
   } catch (err) {
     console.log('AI SVG generation failed for post', idx, ':', err.message);
-    // Silently keep local designs
   }
 }
 
@@ -4490,17 +4547,19 @@ async function aiEnhanceDesigns(idx) {
 
 function regenerateDesigns(idx) {
   const r = allResults[idx];
-  // Save current version to history
   saveVersion(idx, 'designs', r.designs.map(d => d.name));
   r.designSeed = (r.designSeed || 0) + 1;
   r.designs = generateDesignPieces(r.post, getKV(), r.designSeed);
-  // Re-render the designs section
+  
   const card = document.getElementById('card-' + idx);
-  const subs = card.querySelectorAll('.sub, .hero-section');
-  // Designs is the last sub (3rd: keywords, prompts, designs)
-  if (subs[subs.length - 1]) {
-    subs[subs.length - 1].outerHTML = renderDesignsSection(idx, r.designs);
-    // Re-render SVGs in DOM
+  if (!card) return;
+  
+  const heroDesign = card.querySelector('.hero-design');
+  const oldOverlay = document.getElementById(`dvo-${idx}`);
+  
+  if (heroDesign) {
+    if (oldOverlay) oldOverlay.remove();
+    heroDesign.outerHTML = renderDesignsSection(idx, r.designs);
     setTimeout(() => renderDesignSVGs(idx, r.designs), 50);
   }
   showToast('Piezas regeneradas con nueva variación');
@@ -4661,12 +4720,27 @@ async function aiEnhanceKeywords(idx) {
     });
 
     if (parsed.mejorados && parsed.mejorados.length) {
+      // Filter: keep only keywords with 3-6 words max
+      const filtered = parsed.mejorados
+        .filter(k => k && typeof k === 'string')
+        .map(k => k.trim().toLowerCase())
+        .filter(k => {
+          const words = k.split(/\s+/).length;
+          return words >= 2 && words <= 6;
+        })
+        .slice(0, 12);
+      
+      if (filtered.length === 0) {
+        showToast('IA devolvió keywords inválidos, regenerá');
+        return;
+      }
+      
       saveVersion(idx, 'keywords', r.keywords);
-      r.keywords['✦ Mejorados con IA'] = parsed.mejorados.slice(0, 12);
+      r.keywords['✦ Mejorados con IA'] = filtered;
       const card = document.getElementById(`card-${idx}`);
       const subs = card.querySelectorAll('.sub, .hero-section');
       if (subs[0]) subs[0].outerHTML = renderKeywordsSection(idx, r.keywords, r.colorFilter);
-      showToast(`✦ ${parsed.mejorados.length} keywords mejorados con IA`);
+      showToast(`✦ ${filtered.length} keywords mejorados con IA`);
     } else {
       showToast('No se pudieron mejorar los keywords');
     }
@@ -4682,7 +4756,6 @@ async function aiEnhanceKeywords(idx) {
 async function aiEnhancePrompt(idx, tool) {
   const r = allResults[idx];
   const currentPrompt = r.prompts[tool];
-  const btn_label = `⟳ Refinando...`;
   
   showToast('⟳ Refinando prompt con IA...');
 
@@ -4693,9 +4766,20 @@ async function aiEnhancePrompt(idx, tool) {
     if (improved) {
       saveVersion(idx, `prompt_${tool}`, r.prompts[tool]);
       r.prompts[tool] = improved;
-      const card = document.getElementById(`card-${idx}`);
-      const subs = card.querySelectorAll('.sub, .hero-section');
-      if (subs[1]) subs[1].outerHTML = renderPromptsSection(idx, r.prompts);
+      
+      // Update only the specific prompt body (no full re-render)
+      const enEl = document.getElementById(`pb-${idx}-${tool}`);
+      if (enEl) enEl.textContent = improved;
+      
+      // Update ES translation
+      const esEl = document.getElementById(`pbes-${idx}-${tool}`);
+      if (esEl) {
+        esEl.textContent = quickTranslateToES(improved);
+        translateText(improved, 'es').then(better => {
+          if (better && better !== improved) esEl.textContent = better;
+        }).catch(() => {});
+      }
+      
       showToast('✦ Prompt mejorado con IA');
     }
   } catch (err) {
@@ -4735,18 +4819,19 @@ function getToolLogo(key) {
 
 function regeneratePrompt(idx, tool) {
   const r = allResults[idx];
-  // Save current version to history
   saveVersion(idx, `prompt_${tool}`, r.prompts[tool]);
-  // RANDOM seed for COMPLETE regeneration
   r.promptSeeds[tool] = Math.floor(Math.random() * 1000) + Date.now() % 1000;
-  // Track current language: if was ES, regenerate in ES; if EN, regenerate in EN
-  const wasES = r.promptLang && r.promptLang[tool] === 'es';
   const pq = promptQuestionnaire[idx] || {};
   const newPrompts = generatePrompts(r.post, getKV(), getClient(), r.promptSeeds[tool], r.promptDetail[tool], pq);
-  r.prompts[tool] = wasES ? quickTranslateToES(newPrompts[tool]) : newPrompts[tool];
+  r.prompts[tool] = newPrompts[tool];
   document.getElementById(`pb-${idx}-${tool}`).textContent = newPrompts[tool];
   const esEl = document.getElementById(`pbes-${idx}-${tool}`);
-  if (esEl) esEl.textContent = quickTranslateToES(newPrompts[tool]);
+  if (esEl) {
+    esEl.textContent = quickTranslateToES(newPrompts[tool]);
+    translateText(newPrompts[tool], 'es').then(better => {
+      if (better && better !== newPrompts[tool]) esEl.textContent = better;
+    }).catch(() => {});
+  }
   showToast('Prompt regenerado completamente');
 }
 
@@ -4767,7 +4852,13 @@ function applyDetailToPrompt(idx, tool) {
   r.prompts[tool] = newPrompts[tool];
   document.getElementById(`pb-${idx}-${tool}`).textContent = r.prompts[tool];
   const esEl2 = document.getElementById(`pbes-${idx}-${tool}`);
-  if (esEl2) esEl2.textContent = quickTranslateToES(r.prompts[tool]);
+  if (esEl2) {
+    esEl2.textContent = quickTranslateToES(r.prompts[tool]);
+    // Improve with AI translation in background
+    translateText(r.prompts[tool], 'es').then(better => {
+      if (better && better !== r.prompts[tool]) esEl2.textContent = better;
+    }).catch(() => {});
+  }
   toggleDetailForm(idx, tool);
   document.getElementById(`dfi-${idx}-${tool}`).value = '';
   showToast('Prompt regenerado con más detalle');
@@ -4779,12 +4870,16 @@ async function translatePrompt(idx, tool) {
   const currentLang = r.promptLang[tool] || 'en';
   
   if (currentLang === 'en') {
-    // Translate to Spanish
-    const translated = await translateText(r.prompts[tool], 'es');
-    r.prompts[tool] = translated;
-    r.promptLang[tool] = 'es';
-    document.getElementById(`pb-${idx}-${tool}`).textContent = translated;
-    showToast('Traducido a Español');
+    showToast('⟳ Traduciendo con IA...');
+    try {
+      const translated = await translateText(r.prompts[tool], 'es');
+      r.prompts[tool] = translated;
+      r.promptLang[tool] = 'es';
+      document.getElementById(`pb-${idx}-${tool}`).textContent = translated;
+      showToast('✓ Traducido a Español');
+    } catch (err) {
+      showToast('Error al traducir');
+    }
   } else {
     // Translate back to English (regenerate fresh)
     const fresh = generatePrompts(r.post, getKV(), getClient(), r.promptSeeds[tool], r.promptDetail[tool], promptQuestionnaire[idx] || {});
@@ -4795,10 +4890,21 @@ async function translatePrompt(idx, tool) {
   }
 }
 
-// Better translation using a comprehensive dictionary
+// Use AI backend for high-quality translation
 async function translateText(text, lang) {
   if (lang !== 'es') return text;
-  return quickTranslateToES(text);
+  
+  try {
+    const result = await callBackend('/api/enhance-prompt', { 
+      prompt: text,
+      systemPrompt: 'Sos un traductor profesional. Traducí el siguiente prompt de inglés a español manteniendo el tono creativo y la estructura. Conservá términos técnicos como "depth of field", "shallow focus", "9:16", "1:1" en inglés. Respondé SOLO con la traducción, sin explicaciones, sin markdown.',
+      userMsg: text
+    });
+    return result.improved || quickTranslateToES(text);
+  } catch (err) {
+    console.error('AI translation failed, using fallback:', err);
+    return quickTranslateToES(text);
+  }
 }
 
 function quickTranslateToES(text) {
@@ -5020,8 +5126,21 @@ function copyPromptText(btn, idx, tool) {
   });
 }
 
-function copyPromptES(btn, idx, tool) {
-  const esText = document.getElementById(`pbes-${idx}-${tool}`)?.textContent || quickTranslateToES(allResults[idx].prompts[tool]);
+async function copyPromptES(btn, idx, tool) {
+  const cached = document.getElementById(`pbes-${idx}-${tool}`)?.textContent;
+  let esText = cached;
+  
+  if (!esText || esText.length < 20) {
+    const o = btn.textContent;
+    btn.textContent = '⟳ Traduciendo...';
+    try {
+      esText = await translateText(allResults[idx].prompts[tool], 'es');
+    } catch {
+      esText = quickTranslateToES(allResults[idx].prompts[tool]);
+    }
+    btn.textContent = o;
+  }
+  
   navigator.clipboard.writeText(esText).then(() => {
     const o = btn.textContent;
     btn.textContent = '✓ ES';
